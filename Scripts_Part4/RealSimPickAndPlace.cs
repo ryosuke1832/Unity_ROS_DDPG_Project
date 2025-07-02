@@ -109,32 +109,32 @@ public class RealSimPickAndPlace : MonoBehaviour
     ///     position and rotation.
     ///     Includes conversion from Unity coordinates to ROS coordinates, Forward Left Up
     /// </summary>
-    public void PublishJoints()
+
+public void PublishJoints()
+{
+    var request = new MoverServiceRequest
     {
-        var request = new MoverServiceRequest
+        joints_input = new NiryoMoveitJointsMsg(),
+        pick_pose = new PoseMsg
         {
-            joints_input = new NiryoMoveitJointsMsg(),
-            pick_pose = new PoseMsg
-            {
-                position = (m_Target.transform.position + m_PickPoseOffset).To<FLU>(),
-
-                // The hardcoded x/z angles assure that the gripper is always positioned above the m_Target cube before grasping.
-                orientation = Quaternion.Euler(90, m_Target.transform.eulerAngles.y, 0).To<FLU>()
-            },
-            place_pose = new PoseMsg
-            {
-                position = (m_TargetPlacement.transform.position + m_PickPoseOffset).To<FLU>(),
-                orientation = m_PickOrientation.To<FLU>()
-            }
-        };
-
-        for (var i = 0; i < k_NumRobotJoints; i++)
+            position = (m_Target.transform.position + m_PickPoseOffset).To<FLU>(),
+            orientation = Quaternion.Euler(90, m_Target.transform.eulerAngles.y, 0).To<FLU>()
+        },
+        // place_poseを同じ位置（pick_pose）に設定
+        place_pose = new PoseMsg
         {
-            request.joints_input.joints[i] = m_JointArticulationBodies[i].jointPosition[0];
+            position = (m_Target.transform.position + m_PickPoseOffset).To<FLU>(),
+            orientation = Quaternion.Euler(90, m_Target.transform.eulerAngles.y, 0).To<FLU>()
         }
+    };
 
-        m_Ros.Publish(rosJointPublishTopicName, request);
+    for (var i = 0; i < k_NumRobotJoints; i++)
+    {
+        request.joints_input.joints[i] = m_JointArticulationBodies[i].jointPosition[0];
     }
+
+    m_Ros.Publish(rosJointPublishTopicName, request);
+}
 
     /// <summary>
     ///     Execute robot commands receved from ROS Subscriber.

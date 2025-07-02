@@ -69,6 +69,7 @@ def plan_trajectory(move_group, destination_pose, start_joint_angles):
 
     https://github.com/ros-planning/moveit/blob/master/moveit_commander/src/moveit_commander/move_group.py
 """
+
 def plan_pick_and_place(req):
     response = MoverServiceResponse()
 
@@ -80,7 +81,6 @@ def plan_pick_and_place(req):
     # Pre grasp - position gripper directly above target object
     pre_grasp_pose = plan_trajectory(move_group, req.pick_pose, current_robot_joint_configuration)
     
-    # If the trajectory has no points, planning has failed and we return an empty response
     if not pre_grasp_pose.joint_trajectory.points:
         return response
 
@@ -88,7 +88,7 @@ def plan_pick_and_place(req):
 
     # Grasp - lower gripper so that fingers are on either side of object
     pick_pose = copy.deepcopy(req.pick_pose)
-    pick_pose.position.z -= 0.05  # Static value coming from Unity, TODO: pass along with request
+    pick_pose.position.z -= 0.05
     grasp_pose = plan_trajectory(move_group, pick_pose, previous_ending_joint_angles)
     
     if not grasp_pose.joint_trajectory.points:
@@ -96,30 +96,40 @@ def plan_pick_and_place(req):
 
     previous_ending_joint_angles = grasp_pose.joint_trajectory.points[-1].positions
 
-    # Pick Up - raise gripper back to the pre grasp position
-    pick_up_pose = plan_trajectory(move_group, req.pick_pose, previous_ending_joint_angles)
+    # Pick Up - raise gripper to a higher position (lift up)
+    lift_pose = copy.deepcopy(req.pick_pose)
+    lift_pose.position.z += 0.10  # 元の位置より10cm高く持ち上げ
+    pick_up_pose = plan_trajectory(move_group, lift_pose, previous_ending_joint_angles)
     
     if not pick_up_pose.joint_trajectory.points:
         return response
 
     previous_ending_joint_angles = pick_up_pose.joint_trajectory.points[-1].positions
 
-    # Place - move gripper to desired placement position
-    place_pose = plan_trajectory(move_group, req.place_pose, previous_ending_joint_angles)
+    # Return to original pre-grasp position
+    return_pose = plan_trajectory(move_group, req.pick_pose, previous_ending_joint_angles)
+    
+    if not return_pose.joint_trajectory.points:
+        return response
+
+    previous_ending_joint_angles = return_pose.joint_trajectory.points[-1].positions
+
+    # Place - lower back to original grasp position (same as pick_pose)
+    place_pose = plan_trajectory(move_group, pick_pose, previous_ending_joint_angles)
 
     if not place_pose.joint_trajectory.points:
         return response
 
-    # If trajectory planning worked for all pick and place stages, add plan to response
+    # Add all trajectories to response
     response.trajectories.append(pre_grasp_pose)
     response.trajectories.append(grasp_pose)
     response.trajectories.append(pick_up_pose)
+    response.trajectories.append(return_pose)
     response.trajectories.append(place_pose)
 
     move_group.clear_pose_targets()
 
     return response
-
 
 def moveit_server():
     moveit_commander.roscpp_initialize(sys.argv)
