@@ -25,8 +25,8 @@ public class GripperForceController : MonoBehaviour
     [SerializeField] protected float kd = 0.05f; // 微分ゲイン
     
     [Header("グリッパー参照")]
-    [SerializeField] public  ArticulationBody leftGripper;
-    [SerializeField] public  ArticulationBody rightGripper;
+    [SerializeField] protected ArticulationBody leftGripper;
+    [SerializeField] protected ArticulationBody rightGripper;
     
     [Header("デバッグ情報")]
     [SerializeField] protected bool showDebugInfo = true;
