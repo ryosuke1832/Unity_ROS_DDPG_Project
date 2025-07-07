@@ -118,6 +118,21 @@ public class EnhancedGripperForceController : GripperForceController
     }
     
     /// <summary>
+    /// 把持開始（オーバーライド）
+    /// </summary>
+    /// <param name="targetForce">目標把持力</param>
+    /// <param name="enableForceControl">力制御を有効にするか</param>
+    public override void StartGrasping(float targetForce = -1f, bool enableForceControl = true)
+    {
+        base.StartGrasping(targetForce, enableForceControl);
+        
+        if (showDebugInfo)
+        {
+            Debug.Log($"変形対応把持開始 - 目標力: {targetForce}N");
+        }
+    }
+    
+    /// <summary>
     /// 把持停止時のオーバーライド
     /// </summary>
     public override void StopGrasping()
@@ -129,6 +144,15 @@ public class EnhancedGripperForceController : GripperForceController
             currentTarget.StopGrasping();
             currentTarget = null;
         }
+    }
+    
+    /// <summary>
+    /// 現在のグリッパー力を取得
+    /// </summary>
+    /// <returns>平均把持力</returns>
+    public float GetCurrentGripperForce()
+    {
+        return averageGripForce;
     }
     
     /// <summary>
@@ -153,6 +177,21 @@ public class EnhancedGripperForceController : GripperForceController
     public void SetForceTransmissionEnabled(bool enabled)
     {
         enableForceTransmission = enabled;
+    }
+    
+    /// <summary>
+    /// DeformableTargetとの相互作用用メソッド
+    /// </summary>
+    /// <param name="force">把持力</param>
+    /// <param name="contactPoint">接触点</param>
+    /// <param name="forceDirection">力の方向</param>
+    public void ApplyGripForce(float force, Vector3 contactPoint, Vector3 forceDirection)
+    {
+        // DeformableTargetからの力適用要求に対応
+        if (currentTarget != null)
+        {
+            currentTarget.BeginGrasping(force, contactPoint, forceDirection);
+        }
     }
     
     protected override void OnDrawGizmos()
@@ -206,46 +245,4 @@ public class EnhancedGripperForceController : GripperForceController
         GUILayout.Label($"力伝達: {(enableForceTransmission ? "有効" : "無効")}");
         GUILayout.EndArea();
     }
-
-    
-// EnhancedGripperForceController.cs に以下のメソッドを追加
-
-/// <summary>
-/// 現在のグリッパー力を取得
-/// </summary>
-/// <returns>平均把持力</returns>
-public float GetCurrentGripperForce()
-{
-    return averageGripForce;
-}
-
-/// <summary>
-/// 把持開始（オーバーライド）
-/// </summary>
-/// <param name="targetForce">目標把持力</param>
-public override void StartGrasping(float targetForce)
-{
-    base.StartGrasping(targetForce);
-    
-    if (showDebugInfo)
-    {
-        Debug.Log($"変形対応把持開始 - 目標力: {targetForce}N");
-    }
-}
-
-/// <summary>
-/// DeformableTargetクラス内で使用されるメソッド
-/// （もしDeformableTarget.cs内でcurrentTarget.ApplyGripForce()を呼び出している場合）
-/// </summary>
-/// <param name="force">把持力</param>
-/// <param name="contactPoint">接触点</param>
-/// <param name="forceDirection">力の方向</param>
-public void ApplyGripForce(float force, Vector3 contactPoint, Vector3 forceDirection)
-{
-    // この機能がDeformableTargetで必要な場合に実装
-    if (currentTarget != null)
-    {
-        currentTarget.StartGrasping(force, contactPoint, forceDirection);
-    }
-}
 }
