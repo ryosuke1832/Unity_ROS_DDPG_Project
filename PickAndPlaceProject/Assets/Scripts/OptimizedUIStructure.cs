@@ -2,7 +2,7 @@ using UnityEngine;
 using UnityEngine.UI;
 
 /// <summary>
-/// 把持力制御研究に最適化されたUI構造を自動構築（重なり修正版）
+/// 把持力制御研究に最適化されたUI構造を自動構築
 /// </summary>
 public class OptimizedUIStructure : MonoBehaviour
 {
@@ -91,14 +91,11 @@ public class OptimizedUIStructure : MonoBehaviour
     }
     
     /// <summary>
-    /// Create control panel (左上)
+    /// Create control panel (top-left)
     /// </summary>
     private void CreateControlPanel(GameObject parent)
     {
-        // 左上アンカーで配置
-        GameObject panel = CreatePanelWithAnchor("ControlPanel", parent, 
-                                                 new Vector2(0f, 1f), new Vector2(0f, 1f),
-                                                 new Vector2(185f, -135f), new Vector2(350, 250));
+        GameObject panel = CreatePanel("ControlPanel", parent, new Vector2(-400, 300), new Vector2(350, 250));
         
         // Title
         CreateText("ControlTitle", panel, "Grasp Force Control", new Vector2(0, 100), 18, FontStyle.Bold);
@@ -122,14 +119,11 @@ public class OptimizedUIStructure : MonoBehaviour
     }
     
     /// <summary>
-    /// Create feedback panel (右上)
+    /// Create feedback panel (top-right)
     /// </summary>
     private void CreateFeedbackPanel(GameObject parent)
     {
-        // 右上アンカーで配置
-        GameObject panel = CreatePanelWithAnchor("FeedbackPanel", parent,
-                                                 new Vector2(1f, 1f), new Vector2(1f, 1f),
-                                                 new Vector2(-185f, -135f), new Vector2(350, 250));
+        GameObject panel = CreatePanel("FeedbackPanel", parent, new Vector2(400, 300), new Vector2(350, 250));
         
         // Title
         CreateText("FeedbackTitle", panel, "Human Feedback", new Vector2(0, 100), 18, FontStyle.Bold);
@@ -144,19 +138,16 @@ public class OptimizedUIStructure : MonoBehaviour
     }
     
     /// <summary>
-    /// Create data panel (左下)
+    /// Create data panel (bottom-left)
     /// </summary>
     private void CreateDataPanel(GameObject parent)
     {
-        // 左下アンカーで配置
-        GameObject panel = CreatePanelWithAnchor("DataPanel", parent,
-                                                 new Vector2(0f, 0f), new Vector2(0f, 0f),
-                                                 new Vector2(185f, 135f), new Vector2(350, 250));
+        GameObject panel = CreatePanel("DataPanel", parent, new Vector2(-400, -300), new Vector2(350, 250));
         
         // Title
         CreateText("DataTitle", panel, "Real-time Data", new Vector2(0, 100), 18, FontStyle.Bold);
         
-        // Data display - 縦に整列
+        // Data display
         CreateText("CurrentForce", panel, "Current Force: 0.0 N", new Vector2(0, 60), 14);
         CreateText("GripperPosition", panel, "Gripper Position: 0.000", new Vector2(0, 30), 14);
         CreateText("GraspStatus", panel, "Grasp Status: Standby", new Vector2(0, 0), 14);
@@ -165,19 +156,16 @@ public class OptimizedUIStructure : MonoBehaviour
     }
     
     /// <summary>
-    /// Create debug panel (右下)
+    /// Create debug panel (bottom-right)
     /// </summary>
     private void CreateDebugPanel(GameObject parent)
     {
-        // 右下アンカーで配置
-        GameObject panel = CreatePanelWithAnchor("DebugPanel", parent,
-                                                 new Vector2(1f, 0f), new Vector2(1f, 0f),
-                                                 new Vector2(-185f, 135f), new Vector2(350, 250));
+        GameObject panel = CreatePanel("DebugPanel", parent, new Vector2(400, -300), new Vector2(350, 250));
         
         // Title
         CreateText("DebugTitle", panel, "Debug Information", new Vector2(0, 100), 18, FontStyle.Bold);
         
-        // Debug information - 縦に整列して重なりを回避
+        // Debug information
         CreateText("LeftForce", panel, "Left Force: 0.0 N", new Vector2(-80, 60), 12);
         CreateText("RightForce", panel, "Right Force: 0.0 N", new Vector2(80, 60), 12);
         CreateText("ForceBalance", panel, "Force Balance: 0.0", new Vector2(0, 30), 12);
@@ -189,29 +177,7 @@ public class OptimizedUIStructure : MonoBehaviour
     }
     
     /// <summary>
-    /// アンカー指定パネル作成ヘルパー（修正版）
-    /// </summary>
-    private GameObject CreatePanelWithAnchor(string name, GameObject parent, 
-                                           Vector2 anchorMin, Vector2 anchorMax,
-                                           Vector2 anchoredPosition, Vector2 size)
-    {
-        GameObject panel = new GameObject(name);
-        panel.transform.SetParent(parent.transform, false);
-        
-        RectTransform rect = panel.AddComponent<RectTransform>();
-        rect.anchorMin = anchorMin;
-        rect.anchorMax = anchorMax;
-        rect.anchoredPosition = anchoredPosition;
-        rect.sizeDelta = size;
-        
-        Image image = panel.AddComponent<Image>();
-        image.color = panelColor;
-        
-        return panel;
-    }
-    
-    /// <summary>
-    /// パネル作成ヘルパー（従来版 - 互換性のため残す）
+    /// パネル作成ヘルパー
     /// </summary>
     private GameObject CreatePanel(string name, GameObject parent, Vector2 position, Vector2 size)
     {
