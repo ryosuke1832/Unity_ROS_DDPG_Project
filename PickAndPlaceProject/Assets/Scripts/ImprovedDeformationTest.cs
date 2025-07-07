@@ -231,8 +231,8 @@ public class ImprovedDeformationTest : MonoBehaviour
         {
             Material mat = new Material(Shader.Find("Standard"));
             mat.color = new Color(0.3f, 0.7f, 1f, 1f); // 明るい青
-            mat.metallic = 0.2f;
-            mat.smoothness = 0.8f;
+            mat.SetFloat("_Metallic", 0.2f);
+            mat.SetFloat("_Glossiness", 0.8f);
             renderer.material = mat;
         }
         
