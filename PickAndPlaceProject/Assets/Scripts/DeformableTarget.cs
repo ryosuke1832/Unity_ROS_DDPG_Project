@@ -1,534 +1,360 @@
 using UnityEngine;
-using UnityEngine.UI;
 using System.Collections.Generic;
 
 /// <summary>
-/// 変形テスト管理システム
+/// 把持力に応じて変形するターゲットオブジェクト
 /// </summary>
-public class DeformationTestManager : MonoBehaviour
+public class DeformableTarget : MonoBehaviour
 {
-    [Header("=== 参照 ===")]
-    [SerializeField] private GripperForceController gripperController;
-    [SerializeField] private SimpleGripForceController simpleGripController;
-    [SerializeField] private Transform targetSpawnPoint;
+    [Header("=== 変形パラメータ ===")]
+    [SerializeField, Range(0f, 1f), Tooltip("物体の柔軟性（0=硬い、1=柔らかい）")]
+    private float softness = 0.5f;
     
-    [Header("=== テスト用ターゲットプリファブ ===")]
-    [SerializeField] private GameObject[] deformableTargetPrefabs;
+    [SerializeField, Range(0.1f, 2f), Tooltip("最大変形度合い")]
+    private float maxDeformation = 0.3f;
     
-    [Header("=== UI要素 ===")]
-    [SerializeField] private Canvas testUI;
-    [SerializeField] private Button startGraspButton;
-    [SerializeField] private Button stopGraspButton;
-    [SerializeField] private Button spawnTargetButton;
-    [SerializeField] private Slider forceSlider;
-    [SerializeField] private Slider softnessSlider;
-    [SerializeField] private Dropdown deformationTypeDropdown;
-    [SerializeField] private Text statusText;
+    [SerializeField, Range(1f, 50f), Tooltip("変形に必要な最小力")]
+    private float minForceToDeform = 5f;
     
-    [Header("=== テストパラメータ ===")]
-    [SerializeField] private bool autoCreateUI = true;
-    [SerializeField] private bool enableDataLogging = true;
+    [SerializeField, Range(10f, 100f), Tooltip("完全変形に必要な力")]
+    private float maxForceToDeform = 30f;
+    
+    [Header("=== 変形タイプ ===")]
+    [SerializeField] private DeformationType deformationType = DeformationType.Squeeze;
+    
+    [Header("=== ビジュアル設定 ===")]
+    [SerializeField] private bool enableMaterialChange = true;
+    [SerializeField] private Material normalMaterial;
+    [SerializeField] private Material deformedMaterial;
+    
+    [Header("=== デバッグ ===")]
+    [SerializeField] private bool showDebugInfo = true;
     
     // 内部変数
-    private List<DeformableTarget> spawnedTargets = new List<DeformableTarget>();
-    private DeformableTarget currentTestTarget = null;
-    private List<TestDataEntry> testData = new List<TestDataEntry>();
+    private Vector3 originalScale;
+    private Vector3 originalPosition;
+    private Quaternion originalRotation;
+    private MeshRenderer meshRenderer;
+    private Collider objectCollider;
+    private Rigidbody objectRigidbody;
     
-    [System.Serializable]
-    public struct TestDataEntry
+    // 変形状態
+    private float currentDeformation = 0f;
+    private float currentForce = 0f;
+    private bool isBeingGrasped = false;
+    private Vector3 graspPoint;
+    private Vector3 graspDirection;
+    
+    // 物理シミュレーション用
+    private List<Vector3> vertexOffsets = new List<Vector3>();
+    private MeshFilter meshFilter;
+    private Mesh originalMesh;
+    private Vector3[] originalVertices;
+    private Vector3[] deformedVertices;
+    
+    public enum DeformationType
     {
-        public float timestamp;
-        public float appliedForce;
-        public float deformation;
-        public string deformationType;
-        public float targetSoftness;
+        Squeeze,        // 圧縮変形
+        Bend,           // 屈曲変形
+        Stretch,        // 伸張変形
+        Soft            // ソフトボディ風変形
     }
+    
+    // プロパティ
+    public float CurrentDeformation => currentDeformation;
+    public float CurrentForce => currentForce;
+    public bool IsDeformed => currentDeformation > 0.1f;
+    public float Softness => softness;
     
     void Start()
     {
-        InitializeTestManager();
-        if (autoCreateUI) CreateTestUI();
-        SetupEventHandlers();
+        InitializeDeformableTarget();
     }
     
     void Update()
     {
-        UpdateStatus();
-        if (enableDataLogging) LogTestData();
-    }
-    
-    /// <summary>
-    /// テストマネージャーの初期化
-    /// </summary>
-    private void InitializeTestManager()
-    {
-        // コントローラーの自動検出
-        if (gripperController == null)
-            gripperController = FindObjectOfType<GripperForceController>();
+        UpdateDeformation();
         
-        if (simpleGripController == null)
-            simpleGripController = FindObjectOfType<SimpleGripForceController>();
-        
-        // スポーン地点の設定
-        if (targetSpawnPoint == null)
+        if (showDebugInfo && isBeingGrasped)
         {
-            GameObject spawnGO = new GameObject("TargetSpawnPoint");
-            targetSpawnPoint = spawnGO.transform;
-            targetSpawnPoint.position = new Vector3(0f, 0.65f, 0f);
-        }
-        
-        Debug.Log("DeformationTestManager初期化完了");
-    }
-    
-    /// <summary>
-    /// テスト用UIの自動作成
-    /// </summary>
-    private void CreateTestUI()
-    {
-        if (testUI != null) return;
-        
-        // Canvas作成
-        GameObject canvasGO = new GameObject("DeformationTestUI");
-        testUI = canvasGO.AddComponent<Canvas>();
-        testUI.renderMode = RenderMode.ScreenSpaceOverlay;
-        canvasGO.AddComponent<CanvasScaler>();
-        canvasGO.AddComponent<GraphicRaycaster>();
-        
-        // パネル作成
-        GameObject panel = new GameObject("TestPanel");
-        panel.transform.SetParent(testUI.transform, false);
-        RectTransform panelRect = panel.AddComponent<RectTransform>();
-        panelRect.anchorMin = new Vector2(0, 0.7f);
-        panelRect.anchorMax = new Vector2(0.4f, 1f);
-        panelRect.offsetMin = Vector2.zero;
-        panelRect.offsetMax = Vector2.zero;
-        
-        Image panelImage = panel.AddComponent<Image>();
-        panelImage.color = new Color(0, 0, 0, 0.7f);
-        
-        // UI要素の作成
-        CreateButton("把持開始", new Vector2(10, -30), panel.transform, OnStartGrasp);
-        CreateButton("把持停止", new Vector2(120, -30), panel.transform, OnStopGrasp);
-        CreateButton("ターゲット生成", new Vector2(230, -30), panel.transform, OnSpawnTarget);
-        
-        forceSlider = CreateSlider("力スライダー", new Vector2(10, -70), panel.transform, 1f, 50f, 10f);
-        CreateLabel("把持力", new Vector2(10, -50), panel.transform);
-        
-        softnessSlider = CreateSlider("柔軟性スライダー", new Vector2(10, -110), panel.transform, 0f, 1f, 0.5f);
-        CreateLabel("柔軟性", new Vector2(10, -90), panel.transform);
-        
-        // 変形タイプドロップダウン
-        deformationTypeDropdown = CreateDropdown("変形タイプ", new Vector2(10, -150), panel.transform,
-            new string[] { "Squeeze", "Bend", "Stretch", "Soft" });
-        CreateLabel("変形タイプ", new Vector2(10, -130), panel.transform);
-        
-        // ステータステキスト
-        statusText = CreateLabel("ステータス: 待機中", new Vector2(10, -180), panel.transform);
-    }
-    
-    /// <summary>
-    /// ボタン作成ヘルパー
-    /// </summary>
-    private Button CreateButton(string text, Vector2 position, Transform parent, System.Action onClick)
-    {
-        GameObject buttonGO = new GameObject(text + "Button");
-        buttonGO.transform.SetParent(parent, false);
-        
-        RectTransform rect = buttonGO.AddComponent<RectTransform>();
-        rect.anchorMin = new Vector2(0, 1);
-        rect.anchorMax = new Vector2(0, 1);
-        rect.anchoredPosition = position;
-        rect.sizeDelta = new Vector2(100, 30);
-        
-        Image image = buttonGO.AddComponent<Image>();
-        image.color = Color.white;
-        
-        Button button = buttonGO.AddComponent<Button>();
-        button.onClick.AddListener(() => onClick?.Invoke());
-        
-        // テキスト
-        GameObject textGO = new GameObject("Text");
-        textGO.transform.SetParent(buttonGO.transform, false);
-        RectTransform textRect = textGO.AddComponent<RectTransform>();
-        textRect.anchorMin = Vector2.zero;
-        textRect.anchorMax = Vector2.one;
-        textRect.offsetMin = Vector2.zero;
-        textRect.offsetMax = Vector2.zero;
-        
-        Text textComponent = textGO.AddComponent<Text>();
-        textComponent.text = text;
-        textComponent.color = Color.black;
-        textComponent.alignment = TextAnchor.MiddleCenter;
-        textComponent.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-        
-        return button;
-    }
-    
-    /// <summary>
-    /// スライダー作成ヘルパー
-    /// </summary>
-    private Slider CreateSlider(string name, Vector2 position, Transform parent, float min, float max, float value)
-    {
-        GameObject sliderGO = new GameObject(name);
-        sliderGO.transform.SetParent(parent, false);
-        
-        RectTransform rect = sliderGO.AddComponent<RectTransform>();
-        rect.anchorMin = new Vector2(0, 1);
-        rect.anchorMax = new Vector2(0, 1);
-        rect.anchoredPosition = position;
-        rect.sizeDelta = new Vector2(200, 20);
-        
-        Slider slider = sliderGO.AddComponent<Slider>();
-        slider.minValue = min;
-        slider.maxValue = max;
-        slider.value = value;
-        
-        // 背景
-        GameObject background = new GameObject("Background");
-        background.transform.SetParent(sliderGO.transform, false);
-        RectTransform bgRect = background.AddComponent<RectTransform>();
-        bgRect.anchorMin = Vector2.zero;
-        bgRect.anchorMax = Vector2.one;
-        bgRect.offsetMin = Vector2.zero;
-        bgRect.offsetMax = Vector2.zero;
-        Image bgImage = background.AddComponent<Image>();
-        bgImage.color = Color.gray;
-        
-        // ハンドル
-        GameObject handle = new GameObject("Handle");
-        handle.transform.SetParent(sliderGO.transform, false);
-        RectTransform handleRect = handle.AddComponent<RectTransform>();
-        handleRect.sizeDelta = new Vector2(20, 20);
-        Image handleImage = handle.AddComponent<Image>();
-        handleImage.color = Color.white;
-        
-        slider.targetGraphic = handleImage;
-        slider.handleRect = handleRect;
-        
-        return slider;
-    }
-    
-    /// <summary>
-    /// ドロップダウン作成ヘルパー
-    /// </summary>
-    private Dropdown CreateDropdown(string name, Vector2 position, Transform parent, string[] options)
-    {
-        GameObject dropdownGO = new GameObject(name);
-        dropdownGO.transform.SetParent(parent, false);
-        
-        RectTransform rect = dropdownGO.AddComponent<RectTransform>();
-        rect.anchorMin = new Vector2(0, 1);
-        rect.anchorMax = new Vector2(0, 1);
-        rect.anchoredPosition = position;
-        rect.sizeDelta = new Vector2(150, 25);
-        
-        Image image = dropdownGO.AddComponent<Image>();
-        image.color = Color.white;
-        
-        Dropdown dropdown = dropdownGO.AddComponent<Dropdown>();
-        dropdown.options.Clear();
-        
-        foreach (string option in options)
-        {
-            dropdown.options.Add(new Dropdown.OptionData(option));
-        }
-        
-        return dropdown;
-    }
-    
-    /// <summary>
-    /// ラベル作成ヘルパー
-    /// </summary>
-    private Text CreateLabel(string text, Vector2 position, Transform parent)
-    {
-        GameObject labelGO = new GameObject(text + "Label");
-        labelGO.transform.SetParent(parent, false);
-        
-        RectTransform rect = labelGO.AddComponent<RectTransform>();
-        rect.anchorMin = new Vector2(0, 1);
-        rect.anchorMax = new Vector2(0, 1);
-        rect.anchoredPosition = position;
-        rect.sizeDelta = new Vector2(200, 20);
-        
-        Text textComponent = labelGO.AddComponent<Text>();
-        textComponent.text = text;
-        textComponent.color = Color.white;
-        textComponent.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-        
-        return textComponent;
-    }
-    
-    /// <summary>
-    /// イベントハンドラーの設定
-    /// </summary>
-    private void SetupEventHandlers()
-    {
-        if (forceSlider != null)
-        {
-            forceSlider.onValueChanged.AddListener(OnForceChanged);
-        }
-        
-        if (softnessSlider != null)
-        {
-            softnessSlider.onValueChanged.AddListener(OnSoftnessChanged);
-        }
-        
-        if (deformationTypeDropdown != null)
-        {
-            deformationTypeDropdown.onValueChanged.AddListener(OnDeformationTypeChanged);
+            Debug.DrawRay(graspPoint, graspDirection * 0.1f, Color.red);
         }
     }
     
     /// <summary>
-    /// 把持開始ボタンハンドラー
+    /// 変形可能ターゲットの初期化
     /// </summary>
-    private void OnStartGrasp()
+    private void InitializeDeformableTarget()
     {
-        if (gripperController != null)
+        // 元の状態を保存
+        originalScale = transform.localScale;
+        originalPosition = transform.localPosition;
+        originalRotation = transform.localRotation;
+        
+        // コンポーネント取得
+        meshRenderer = GetComponent<MeshRenderer>();
+        objectCollider = GetComponent<Collider>();
+        objectRigidbody = GetComponent<Rigidbody>();
+        meshFilter = GetComponent<MeshFilter>();
+        
+        // メッシュ変形の準備
+        if (meshFilter != null && meshFilter.mesh != null)
         {
-            float targetForce = forceSlider != null ? forceSlider.value : 10f;
-            gripperController.StartGrasping(targetForce);
-        }
-        else if (simpleGripController != null)
-        {
-            // SimpleGripForceControllerを使用する場合
-            simpleGripController.enabled = true;
+            originalMesh = meshFilter.mesh;
+            originalVertices = originalMesh.vertices;
+            deformedVertices = new Vector3[originalVertices.Length];
+            System.Array.Copy(originalVertices, deformedVertices, originalVertices.Length);
+            
+            // 頂点オフセットの初期化
+            for (int i = 0; i < originalVertices.Length; i++)
+            {
+                vertexOffsets.Add(Vector3.zero);
+            }
         }
         
-        Debug.Log("把持開始");
+        // マテリアル設定
+        if (normalMaterial == null && meshRenderer != null)
+        {
+            normalMaterial = meshRenderer.material;
+        }
+        
+        if (showDebugInfo)
+        {
+            Debug.Log($"DeformableTarget初期化完了 - 柔軟性: {softness}, 最大変形: {maxDeformation}");
+        }
     }
     
     /// <summary>
-    /// 把持停止ボタンハンドラー
+    /// 変形処理の更新
     /// </summary>
-    private void OnStopGrasp()
+    private void UpdateDeformation()
     {
-        if (gripperController != null)
+        if (!isBeingGrasped)
         {
-            gripperController.StopGrasping();
+            // 把持されていない場合は元の形に戻る
+            RestoreOriginalShape();
+            return;
         }
         
-        Debug.Log("把持停止");
+        // 力に基づく変形度合いの計算
+        float forceRatio = Mathf.Clamp01((currentForce - minForceToDeform) / (maxForceToDeform - minForceToDeform));
+        float targetDeformation = forceRatio * softness;
+        
+        // 変形の適用
+        currentDeformation = Mathf.Lerp(currentDeformation, targetDeformation, Time.deltaTime * 5f);
+        
+        // 変形タイプに応じた処理
+        switch (deformationType)
+        {
+            case DeformationType.Squeeze:
+                ApplySqueezeDeformation();
+                break;
+            case DeformationType.Bend:
+                ApplyBendDeformation();
+                break;
+            case DeformationType.Stretch:
+                ApplyStretchDeformation();
+                break;
+            case DeformationType.Soft:
+                ApplySoftBodyDeformation();
+                break;
+        }
+        
+        // マテリアル変更
+        UpdateMaterial();
     }
     
     /// <summary>
-    /// ターゲット生成ボタンハンドラー
+    /// 圧縮変形の適用
     /// </summary>
-    private void OnSpawnTarget()
+    private void ApplySqueezeDeformation()
     {
-        if (deformableTargetPrefabs.Length == 0)
+        Vector3 deformScale = originalScale;
+        
+        // 把持方向に圧縮
+        if (graspDirection != Vector3.zero)
         {
-            // デフォルトターゲット生成
-            CreateDefaultDeformableTarget();
+            Vector3 localGraspDir = transform.InverseTransformDirection(graspDirection);
+            deformScale -= localGraspDir * currentDeformation * maxDeformation;
         }
         else
         {
-            // プリファブからランダム選択
-            int randomIndex = Random.Range(0, deformableTargetPrefabs.Length);
-            GameObject spawnedGO = Instantiate(deformableTargetPrefabs[randomIndex], targetSpawnPoint.position, Quaternion.identity);
+            // デフォルトではY軸方向に圧縮
+            deformScale.y *= (1f - currentDeformation * maxDeformation);
+        }
+        
+        transform.localScale = Vector3.Lerp(transform.localScale, deformScale, Time.deltaTime * 10f);
+    }
+    
+    /// <summary>
+    /// 屈曲変形の適用
+    /// </summary>
+    private void ApplyBendDeformation()
+    {
+        float bendAngle = currentDeformation * maxDeformation * 30f; // 最大30度の傾き
+        Vector3 bendRotation = originalRotation.eulerAngles;
+        bendRotation.z += bendAngle;
+        
+        transform.localRotation = Quaternion.Lerp(transform.localRotation, 
+                                                Quaternion.Euler(bendRotation), 
+                                                Time.deltaTime * 5f);
+    }
+    
+    /// <summary>
+    /// 伸張変形の適用
+    /// </summary>
+    private void ApplyStretchDeformation()
+    {
+        Vector3 stretchScale = originalScale;
+        stretchScale.y *= (1f + currentDeformation * maxDeformation);
+        stretchScale.x *= (1f - currentDeformation * maxDeformation * 0.5f);
+        stretchScale.z *= (1f - currentDeformation * maxDeformation * 0.5f);
+        
+        transform.localScale = Vector3.Lerp(transform.localScale, stretchScale, Time.deltaTime * 8f);
+    }
+    
+    /// <summary>
+    /// ソフトボディ風変形の適用
+    /// </summary>
+    private void ApplySoftBodyDeformation()
+    {
+        if (meshFilter == null || originalVertices == null) return;
+        
+        // 把持点周辺の頂点を変形
+        for (int i = 0; i < originalVertices.Length; i++)
+        {
+            Vector3 worldVertexPos = transform.TransformPoint(originalVertices[i]);
+            float distanceToGrasp = Vector3.Distance(worldVertexPos, graspPoint);
             
-            DeformableTarget target = spawnedGO.GetComponent<DeformableTarget>();
-            if (target != null)
+            if (distanceToGrasp < 0.1f) // 把持点から0.1m以内
             {
-                spawnedTargets.Add(target);
-                currentTestTarget = target;
-                ApplyCurrentSettings(target);
+                float influence = 1f - (distanceToGrasp / 0.1f);
+                Vector3 deformDirection = graspDirection * currentDeformation * maxDeformation * influence;
+                vertexOffsets[i] = Vector3.Lerp(vertexOffsets[i], deformDirection, Time.deltaTime * 3f);
+                deformedVertices[i] = originalVertices[i] + transform.InverseTransformDirection(vertexOffsets[i]);
+            }
+            else
+            {
+                vertexOffsets[i] = Vector3.Lerp(vertexOffsets[i], Vector3.zero, Time.deltaTime * 2f);
+                deformedVertices[i] = Vector3.Lerp(deformedVertices[i], originalVertices[i], Time.deltaTime * 2f);
             }
         }
         
-        Debug.Log("ターゲット生成");
+        // メッシュ更新
+        Mesh mesh = meshFilter.mesh;
+        mesh.vertices = deformedVertices;
+        mesh.RecalculateNormals();
+        mesh.RecalculateBounds();
     }
     
     /// <summary>
-    /// デフォルト変形ターゲットの作成
+    /// 元の形状に復元
     /// </summary>
-    private void CreateDefaultDeformableTarget()
+    private void RestoreOriginalShape()
     {
-        GameObject targetGO = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        targetGO.name = "DeformableTarget";
-        targetGO.transform.position = targetSpawnPoint.position;
-        targetGO.transform.localScale = Vector3.one * 0.05f;
+        currentDeformation = Mathf.Lerp(currentDeformation, 0f, Time.deltaTime * 3f);
         
-        // 物理コンポーネント
-        Rigidbody rb = targetGO.GetComponent<Rigidbody>();
-        if (rb != null)
+        if (currentDeformation < 0.01f)
         {
-            rb.mass = 0.1f;
-        }
-        
-        // 変形コンポーネント追加
-        DeformableTarget target = targetGO.AddComponent<DeformableTarget>();
-        spawnedTargets.Add(target);
-        currentTestTarget = target;
-        
-        ApplyCurrentSettings(target);
-    }
-    
-    /// <summary>
-    /// 現在の設定をターゲットに適用
-    /// </summary>
-    private void ApplyCurrentSettings(DeformableTarget target)
-    {
-        if (target == null) return;
-        
-        if (softnessSlider != null)
-        {
-            target.SetSoftness(softnessSlider.value);
-        }
-        
-        if (deformationTypeDropdown != null)
-        {
-            DeformableTarget.DeformationType type = (DeformableTarget.DeformationType)deformationTypeDropdown.value;
-            target.SetDeformationType(type);
-        }
-    }
-    
-    /// <summary>
-    /// 力スライダー変更ハンドラー
-    /// </summary>
-    private void OnForceChanged(float value)
-    {
-        if (gripperController != null)
-        {
-            gripperController.SetTargetGripForce(value);
-        }
-    }
-    
-    /// <summary>
-    /// 柔軟性スライダー変更ハンドラー
-    /// </summary>
-    private void OnSoftnessChanged(float value)
-    {
-        if (currentTestTarget != null)
-        {
-            currentTestTarget.SetSoftness(value);
-        }
-        
-        // 全ての生成済みターゲットに適用
-        foreach (var target in spawnedTargets)
-        {
-            if (target != null)
+            currentDeformation = 0f;
+            transform.localScale = originalScale;
+            transform.localRotation = originalRotation;
+            
+            // ソフトボディ変形のリセット
+            if (meshFilter != null && originalVertices != null)
             {
-                target.SetSoftness(value);
-            }
-        }
-    }
-    
-    /// <summary>
-    /// 変形タイプ変更ハンドラー
-    /// </summary>
-    private void OnDeformationTypeChanged(int value)
-    {
-        DeformableTarget.DeformationType type = (DeformableTarget.DeformationType)value;
-        
-        if (currentTestTarget != null)
-        {
-            currentTestTarget.SetDeformationType(type);
-        }
-        
-        // 全ての生成済みターゲットに適用
-        foreach (var target in spawnedTargets)
-        {
-            if (target != null)
-            {
-                target.SetDeformationType(type);
-            }
-        }
-    }
-    
-    /// <summary>
-    /// ステータス更新
-    /// </summary>
-    private void UpdateStatus()
-    {
-        if (statusText == null) return;
-        
-        string status = "待機中";
-        
-        if (gripperController != null)
-        {
-            var graspState = gripperController.GetGraspingState();
-            if (graspState.isGrasping)
-            {
-                status = $"把持中 - 力: {graspState.currentForce:F1}N";
-                if (currentTestTarget != null)
+                Mesh mesh = meshFilter.mesh;
+                mesh.vertices = originalVertices;
+                mesh.RecalculateNormals();
+                mesh.RecalculateBounds();
+                
+                for (int i = 0; i < vertexOffsets.Count; i++)
                 {
-                    status += $", 変形: {currentTestTarget.CurrentDeformation:F2}";
+                    vertexOffsets[i] = Vector3.zero;
                 }
             }
         }
         
-        statusText.text = $"ステータス: {status}";
+        UpdateMaterial();
     }
     
     /// <summary>
-    /// テストデータのログ記録
+    /// マテリアルの更新
     /// </summary>
-    private void LogTestData()
+    private void UpdateMaterial()
     {
-        if (currentTestTarget == null || !currentTestTarget.IsDeformed) return;
+        if (!enableMaterialChange || meshRenderer == null) return;
         
-        var dataEntry = new TestDataEntry
+        if (currentDeformation > 0.1f && deformedMaterial != null)
         {
-            timestamp = Time.time,
-            appliedForce = currentTestTarget.CurrentForce,
-            deformation = currentTestTarget.CurrentDeformation,
-            deformationType = currentTestTarget.GetType().Name,
-            targetSoftness = currentTestTarget.Softness
-        };
-        
-        testData.Add(dataEntry);
-        
-        // データが多くなりすぎた場合の制限
-        if (testData.Count > 1000)
+            meshRenderer.material = deformedMaterial;
+        }
+        else if (normalMaterial != null)
         {
-            testData.RemoveAt(0);
+            meshRenderer.material = normalMaterial;
         }
     }
     
     /// <summary>
-    /// テストデータのエクスポート
+    /// 外部からの力の適用（GripperForceControllerから呼び出される）
     /// </summary>
-    public void ExportTestData()
+    /// <param name="force">適用される力</param>
+    /// <param name="contactPoint">接触点</param>
+    /// <param name="forceDirection">力の方向</param>
+    public void ApplyGripForce(float force, Vector3 contactPoint, Vector3 forceDirection)
     {
-        if (testData.Count == 0)
+        currentForce = force;
+        isBeingGrasped = force > minForceToDeform;
+        graspPoint = contactPoint;
+        graspDirection = forceDirection.normalized;
+        
+        if (showDebugInfo && isBeingGrasped)
         {
-            Debug.Log("エクスポートするデータがありません");
-            return;
+            Debug.Log($"把持力適用: {force:F2}N, 変形度: {currentDeformation:F3}, 接触点: {contactPoint}");
         }
-        
-        string csvData = "Timestamp,AppliedForce,Deformation,DeformationType,TargetSoftness\n";
-        
-        foreach (var entry in testData)
-        {
-            csvData += $"{entry.timestamp},{entry.appliedForce},{entry.deformation},{entry.deformationType},{entry.targetSoftness}\n";
-        }
-        
-        System.IO.File.WriteAllText(Application.persistentDataPath + "/deformation_test_data.csv", csvData);
-        Debug.Log($"テストデータをエクスポートしました: {Application.persistentDataPath}/deformation_test_data.csv");
     }
     
     /// <summary>
-    /// 生成されたターゲットのクリーンアップ
+    /// 把持の停止
     /// </summary>
-    public void ClearAllTargets()
+    public void StopGrasping()
     {
-        foreach (var target in spawnedTargets)
-        {
-            if (target != null)
-            {
-                DestroyImmediate(target.gameObject);
-            }
-        }
-        
-        spawnedTargets.Clear();
-        currentTestTarget = null;
-        
-        Debug.Log("全てのターゲットをクリアしました");
+        isBeingGrasped = false;
+        currentForce = 0f;
+        graspPoint = Vector3.zero;
+        graspDirection = Vector3.zero;
     }
     
-    void OnDestroy()
+    /// <summary>
+    /// 柔軟性パラメータの設定
+    /// </summary>
+    public void SetSoftness(float newSoftness)
     {
-        ClearAllTargets();
+        softness = Mathf.Clamp01(newSoftness);
+    }
+    
+    /// <summary>
+    /// 変形タイプの設定
+    /// </summary>
+    public void SetDeformationType(DeformationType type)
+    {
+        deformationType = type;
+        RestoreOriginalShape();
+    }
+    
+    void OnDrawGizmos()
+    {
+        if (showDebugInfo && isBeingGrasped)
+        {
+            Gizmos.color = Color.yellow;
+            Gizmos.DrawWireSphere(graspPoint, 0.02f);
+            
+            Gizmos.color = Color.red;
+            Gizmos.DrawRay(graspPoint, graspDirection * 0.1f);
+            
+            // 変形度合いを表示
+            Gizmos.color = Color.Lerp(Color.green, Color.red, currentDeformation);
+            Gizmos.DrawWireCube(transform.position, transform.localScale * 1.1f);
+        }
     }
 }
