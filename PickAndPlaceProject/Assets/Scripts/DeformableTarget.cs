@@ -395,19 +395,6 @@ public class DeformableTarget : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// 外部から把持停止を通知
-    /// </summary>
-    public void StopGrasping()
-    {
-        isBeingGrasped = false;
-        currentForce = 0f;
-        
-        if (showDebugInfo)
-        {
-            Debug.Log("把持停止");
-        }
-    }
 
     /// <summary>
     /// 把持力を更新
@@ -421,33 +408,6 @@ public class DeformableTarget : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// 柔軟性を外部から設定
-    /// </summary>
-    /// <param name="softnessValue">柔軟性値（0-1）</param>
-    public void SetSoftness(float softnessValue)
-    {
-        softness = Mathf.Clamp01(softnessValue);
-        
-        if (showDebugInfo)
-        {
-            Debug.Log($"柔軟性を{softness}に設定");
-        }
-    }
-
-    /// <summary>
-    /// 変形タイプを外部から設定
-    /// </summary>
-    /// <param name="type">変形タイプ</param>
-    public void SetDeformationType(DeformationType type)
-    {
-        deformationType = type;
-        
-        if (showDebugInfo)
-        {
-            Debug.Log($"変形タイプを{type}に設定");
-        }
-    }
 
     /// <summary>
     /// 現在の変形状態を取得
