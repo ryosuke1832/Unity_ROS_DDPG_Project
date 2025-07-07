@@ -1,7 +1,7 @@
 using UnityEngine;
 
 /// <summary>
-/// グリッパー制御に関する共通の型定義（最小版）
+/// グリッパー制御に関する共通の型定義
 /// </summary>
 
 /// <summary>
