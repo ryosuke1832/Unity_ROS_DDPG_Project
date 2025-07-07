@@ -11,41 +11,41 @@ public class GripperForceController : MonoBehaviour
 {
     [Header("把持力制御パラメータ")]
     [Range(0.1f, 100f)]
-    [SerializeField] protected float targetGripForce = 10f;
+    [SerializeField] private float targetGripForce = 10f;
     
     [Range(0f, 1f)]
-    [SerializeField] protected float softness = 0.5f; // 0=硬い把持, 1=柔らかい把持
+    [SerializeField] private float softness = 0.5f; // 0=硬い把持, 1=柔らかい把持
     
     [Range(1f, 50f)]
-    [SerializeField] protected float forceControlSpeed = 10f; // 力制御の応答速度
+    [SerializeField] private float forceControlSpeed = 10f; // 力制御の応答速度
     
     [Header("PID制御パラメータ")]
-    [SerializeField] protected float kp = 1.0f; // 比例ゲイン
-    [SerializeField] protected float ki = 0.1f; // 積分ゲイン
-    [SerializeField] protected float kd = 0.05f; // 微分ゲイン
+    [SerializeField] private float kp = 1.0f; // 比例ゲイン
+    [SerializeField] private float ki = 0.1f; // 積分ゲイン
+    [SerializeField] private float kd = 0.05f; // 微分ゲイン
     
     [Header("グリッパー参照")]
-    [SerializeField] protected ArticulationBody leftGripper;
-    [SerializeField] protected ArticulationBody rightGripper;
+    [SerializeField] private ArticulationBody leftGripper;
+    [SerializeField] private ArticulationBody rightGripper;
     
     [Header("デバッグ情報")]
-    [SerializeField] protected bool showDebugInfo = true;
-    [SerializeField] protected float currentLeftForce = 0f;
-    [SerializeField] protected float currentRightForce = 0f;
-    [SerializeField] protected float averageGripForce = 0f;
+    [SerializeField] private bool showDebugInfo = true;
+    [SerializeField] private float currentLeftForce = 0f;
+    [SerializeField] private float currentRightForce = 0f;
+    [SerializeField] private float averageGripForce = 0f;
     
     // PID制御用変数
-    protected float integral = 0f;
-    protected float lastError = 0f;
-    protected float currentForce = 0f;
+    private float integral = 0f;
+    private float lastError = 0f;
+    private float currentForce = 0f;
     
     // 把持状態管理
-    protected bool isGrasping = false;
-    protected bool isForceControlActive = false;
+    private bool isGrasping = false;
+    private bool isForceControlActive = false;
     
     // パフォーマンス最適化
-    protected float lastUpdateTime;
-    protected const float UPDATE_INTERVAL = 0.02f; // 50Hz更新
+    private float lastUpdateTime;
+    private const float UPDATE_INTERVAL = 0.02f; // 50Hz更新
     
     void Start()
     {
@@ -63,7 +63,7 @@ public class GripperForceController : MonoBehaviour
         }
     }
     
-    protected virtual void Update()
+    void Update()
     {
         // 高頻度更新を避けるための時間チェック
         if (Time.time - lastUpdateTime < UPDATE_INTERVAL) return;
@@ -80,7 +80,7 @@ public class GripperForceController : MonoBehaviour
     /// <summary>
     /// デバッグ情報の更新
     /// </summary>
-    protected void UpdateDebugInfo()
+    private void UpdateDebugInfo()
     {
         // 左右グリッパーの力を更新
         if (leftGripper != null) 
@@ -99,7 +99,7 @@ public class GripperForceController : MonoBehaviour
     /// <summary>
     /// 外部からの目標力設定
     /// </summary>
-    public virtual void SetTargetGripForce(float force)
+    public void SetTargetGripForce(float force)
     {
         targetGripForce = Mathf.Clamp(force, 0.1f, 100f);
         if (showDebugInfo)
@@ -111,7 +111,7 @@ public class GripperForceController : MonoBehaviour
     /// <summary>
     /// 柔軟性パラメータ設定
     /// </summary>
-    public virtual void SetSoftness(float softnessValue)
+    public void SetSoftness(float softnessValue)
     {
         softness = Mathf.Clamp01(softnessValue);
     }
@@ -119,7 +119,7 @@ public class GripperForceController : MonoBehaviour
     /// <summary>
     /// 把持状態の取得
     /// </summary>
-    public virtual GraspingState GetGraspingState()
+    public GraspingState GetGraspingState()
     {
         return new GraspingState
         {
@@ -135,7 +135,7 @@ public class GripperForceController : MonoBehaviour
     /// <summary>
     /// グリッパーの自動検出
     /// </summary>
-    protected void FindGrippers()
+    private void FindGrippers()
     {
         // 階層からグリッパーを検索
         ArticulationBody[] bodies = FindObjectsOfType<ArticulationBody>();
@@ -159,7 +159,7 @@ public class GripperForceController : MonoBehaviour
     /// </summary>
     /// <param name="targetForce">目標把持力（N）</param>
     /// <param name="enableForceControl">力制御を有効にするか</param>
-    public virtual void StartGrasping(float targetForce = -1f, bool enableForceControl = true)
+    public void StartGrasping(float targetForce = -1f, bool enableForceControl = true)
     {
         if (targetForce > 0) this.targetGripForce = targetForce;
         
@@ -182,7 +182,7 @@ public class GripperForceController : MonoBehaviour
     /// <summary>
     /// 把持停止
     /// </summary>
-    public virtual void StopGrasping()
+    public void StopGrasping()
     {
         isGrasping = false;
         isForceControlActive = false;
@@ -198,7 +198,7 @@ public class GripperForceController : MonoBehaviour
     /// <summary>
     /// リアルタイム力制御更新
     /// </summary>
-    protected void UpdateForceControl()
+    private void UpdateForceControl()
     {
         // 現在の把持力を取得
         currentForce = GetCurrentGripperForce();
@@ -213,7 +213,7 @@ public class GripperForceController : MonoBehaviour
     /// <summary>
     /// PID制御による力調整計算
     /// </summary>
-    protected float ControlGripperForce(float targetForce, float currentForce, float deltaTime)
+    private float ControlGripperForce(float targetForce, float currentForce, float deltaTime)
     {
         float error = targetForce - currentForce;
         
@@ -235,7 +235,7 @@ public class GripperForceController : MonoBehaviour
     /// <summary>
     /// 力調整をグリッパーに適用
     /// </summary>
-    protected void ApplyForceAdjustment(float adjustment)
+    private void ApplyForceAdjustment(float adjustment)
     {
         // 調整値をクランプ
         float adjustmentClamped = Mathf.Clamp(adjustment, -10f, 10f);
@@ -258,7 +258,7 @@ public class GripperForceController : MonoBehaviour
     /// <summary>
     /// グリッパーを閉じる
     /// </summary>
-    protected void CloseGrippers()
+    private void CloseGrippers()
     {
         if (leftGripper != null && rightGripper != null)
         {
@@ -276,7 +276,7 @@ public class GripperForceController : MonoBehaviour
     /// <summary>
     /// グリッパーを開く
     /// </summary>
-    protected void OpenGrippers()
+    private void OpenGrippers()
     {
         if (leftGripper != null && rightGripper != null)
         {
@@ -294,7 +294,7 @@ public class GripperForceController : MonoBehaviour
     /// <summary>
     /// 現在の把持力を取得
     /// </summary>
-    public virtual float GetCurrentGripperForce()
+    public float GetCurrentGripperForce()
     {
         float leftForce = 0f, rightForce = 0f;
         
@@ -343,7 +343,7 @@ public class GripperForceController : MonoBehaviour
     /// <summary>
     /// より詳細な力情報を取得
     /// </summary>
-    public virtual ForceInfo GetDetailedForceInfo()
+    public ForceInfo GetDetailedForceInfo()
     {
         var info = new ForceInfo();
         
@@ -378,7 +378,7 @@ public class GripperForceController : MonoBehaviour
     /// <summary>
     /// グリッパー位置の取得
     /// </summary>
-    protected float GetGripperPosition()
+    private float GetGripperPosition()
     {
         if (leftGripper != null && rightGripper != null)
         {
@@ -390,13 +390,13 @@ public class GripperForceController : MonoBehaviour
     /// <summary>
     /// 把持成功判定
     /// </summary>
-    protected bool IsGraspSuccessful()
+    private bool IsGraspSuccessful()
     {
         return isGrasping && currentForce > 1f && GetGripperPosition() < 0.1f;
     }
     
     // OnGUI デバッグ表示
-    protected virtual void OnGUI()
+    void OnGUI()
     {
         if (!showDebugInfo) return;
         
@@ -416,10 +416,193 @@ public class GripperForceController : MonoBehaviour
         GUILayout.Label($"位置: {GetGripperPosition():F4}");
         GUILayout.EndArea();
     }
+}
+
+
+public class EnhancedGripperForceController : GripperForceController
+{
+    [Header("=== 変形ターゲット検出 ===")]
+    [SerializeField] private LayerMask targetLayers = -1;
+    [SerializeField] private float detectionRadius = 0.05f;
+    [SerializeField] private bool enableForceTransmission = true;
     
-    protected virtual void OnDrawGizmos()
+    // 変形ターゲット追跡
+    private DeformableTarget currentTarget = null;
+    private Vector3 lastContactPoint = Vector3.zero;
+    private Vector3 lastContactNormal = Vector3.zero;
+    
+    protected override void Update()
     {
-        // デフォルトでは何も描画しない
-        // 継承クラスでオーバーライド可能
+        base.Update(); // 基本的な力制御処理
+        
+        // 変形ターゲットとの相互作用
+        DetectAndInteractWithTargets();
+    }
+    
+    /// <summary>
+    /// ターゲット検出と相互作用
+    /// </summary>
+    private void DetectAndInteractWithTargets()
+    {
+        if (!enableForceTransmission || !GetGraspingState().isGrasping) return;
+        
+        DeformableTarget detectedTarget = null;
+        Vector3 contactPoint = Vector3.zero;
+        Vector3 contactNormal = Vector3.zero;
+        
+        // 左グリッパー周辺での検出
+        if (leftGripper != null)
+        {
+            var result = DetectTargetNearGripper(leftGripper.transform.position);
+            if (result.target != null)
+            {
+                detectedTarget = result.target;
+                contactPoint = result.contactPoint;
+                contactNormal = result.contactNormal;
+            }
+        }
+        
+        // 右グリッパー周辺での検出（左で見つからなかった場合）
+        if (detectedTarget == null && rightGripper != null)
+        {
+            var result = DetectTargetNearGripper(rightGripper.transform.position);
+            if (result.target != null)
+            {
+                detectedTarget = result.target;
+                contactPoint = result.contactPoint;
+                contactNormal = result.contactNormal;
+            }
+        }
+        
+        // ターゲットが変わった場合の処理
+        if (currentTarget != detectedTarget)
+        {
+            if (currentTarget != null)
+            {
+                currentTarget.StopGrasping();
+            }
+            currentTarget = detectedTarget;
+        }
+        
+        // 現在のターゲットに力を適用
+        if (currentTarget != null && GetCurrentGripperForce() > 0.1f)
+        {
+            Vector3 forceDirection = contactNormal;
+            if (forceDirection == Vector3.zero)
+            {
+                // デフォルトの力の方向（グリッパー間の方向）
+                if (leftGripper != null && rightGripper != null)
+                {
+                    forceDirection = (rightGripper.transform.position - leftGripper.transform.position).normalized;
+                }
+            }
+            
+            float currentForce = GetCurrentGripperForce();
+            currentTarget.ApplyGripForce(currentForce, contactPoint, forceDirection);
+            lastContactPoint = contactPoint;
+            lastContactNormal = contactNormal;
+            
+            if (showDebugInfo)
+            {
+                Debug.DrawRay(contactPoint, forceDirection * 0.1f, Color.red);
+            }
+        }
+    }
+    
+    /// <summary>
+    /// グリッパー近辺でのターゲット検出
+    /// </summary>
+    private (DeformableTarget target, Vector3 contactPoint, Vector3 contactNormal) DetectTargetNearGripper(Vector3 gripperPosition)
+    {
+        Collider[] colliders = Physics.OverlapSphere(gripperPosition, detectionRadius, targetLayers);
+        
+        foreach (var collider in colliders)
+        {
+            DeformableTarget target = collider.GetComponent<DeformableTarget>();
+            if (target != null)
+            {
+                // 接触点の計算
+                Vector3 contactPoint = collider.ClosestPoint(gripperPosition);
+                Vector3 contactNormal = (gripperPosition - contactPoint).normalized;
+                
+                return (target, contactPoint, contactNormal);
+            }
+        }
+        
+        return (null, Vector3.zero, Vector3.zero);
+    }
+    
+    /// <summary>
+    /// 把持停止時のオーバーライド
+    /// </summary>
+    public override void StopGrasping()
+    {
+        base.StopGrasping();
+        
+        if (currentTarget != null)
+        {
+            currentTarget.StopGrasping();
+            currentTarget = null;
+        }
+    }
+    
+    /// <summary>
+    /// 現在のターゲット取得
+    /// </summary>
+    public DeformableTarget GetCurrentTarget()
+    {
+        return currentTarget;
+    }
+    
+    protected override void OnDrawGizmos()
+    {
+        base.OnDrawGizmos();
+        
+        if (showDebugInfo)
+        {
+            // 検出範囲の表示
+            if (leftGripper != null)
+            {
+                Gizmos.color = Color.cyan;
+                Gizmos.DrawWireSphere(leftGripper.transform.position, detectionRadius);
+            }
+            
+            if (rightGripper != null)
+            {
+                Gizmos.color = Color.cyan;
+                Gizmos.DrawWireSphere(rightGripper.transform.position, detectionRadius);
+            }
+            
+            // 現在のターゲットとの接触点
+            if (currentTarget != null && lastContactPoint != Vector3.zero)
+            {
+                Gizmos.color = Color.yellow;
+                Gizmos.DrawWireSphere(lastContactPoint, 0.01f);
+                
+                Gizmos.color = Color.red;
+                Gizmos.DrawRay(lastContactPoint, lastContactNormal * 0.05f);
+            }
+        }
+    }
+    
+    protected override void OnGUI()
+    {
+        base.OnGUI();
+        
+        if (!showDebugInfo) return;
+        
+        // 追加のデバッグ情報
+        GUILayout.BeginArea(new Rect(320, 10, 250, 150));
+        GUILayout.Label("=== 変形ターゲット情報 ===");
+        GUILayout.Label($"検出範囲: {detectionRadius:F3}m");
+        GUILayout.Label($"現在のターゲット: {(currentTarget != null ? currentTarget.name : "なし")}");
+        if (currentTarget != null)
+        {
+            GUILayout.Label($"ターゲット変形度: {currentTarget.CurrentDeformation:F3}");
+            GUILayout.Label($"ターゲット柔軟性: {currentTarget.Softness:F2}");
+            GUILayout.Label($"変形中: {(currentTarget.IsDeformed ? "はい" : "いいえ")}");
+        }
+        GUILayout.Label($"力伝達: {(enableForceTransmission ? "有効" : "無効")}");
+        GUILayout.EndArea();
     }
 }

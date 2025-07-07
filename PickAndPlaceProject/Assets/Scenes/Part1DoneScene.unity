@@ -2198,16 +2198,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 524299981}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1c5eaabfd025e8d4dbc5273e821a38b1, type: 3}
+  m_Script: {fileID: 11500000, guid: 64cd3534de15d394ebd0d7df13174444, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  enhancedGripperController: {fileID: 0}
-  gripperController: {fileID: 0}
-  simpleGripController: {fileID: 0}
-  targetSpawnPoint: {fileID: 0}
-  targetPrefab: {fileID: 0}
-  showDebugGUI: 1
-  autoSpawnOnStart: 1
 --- !u!4 &524299983
 Transform:
   m_ObjectHideFlags: 0
@@ -10047,7 +10040,6 @@ GameObject:
   - component: {fileID: 2107077248}
   - component: {fileID: 2107077247}
   - component: {fileID: 2107077246}
-  - component: {fileID: 2107077249}
   m_Layer: 0
   m_Name: base_link
   m_TagString: Untagged
@@ -10152,35 +10144,6 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   IsBaseLink: 0
---- !u!114 &2107077249
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 2107077244}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 87151f65233670946a412dcae1b786da, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  targetGripForce: 10
-  softness: 0.5
-  forceControlSpeed: 10
-  kp: 1
-  ki: 0.1
-  kd: 0.05
-  leftGripper: {fileID: 0}
-  rightGripper: {fileID: 0}
-  showDebugInfo: 1
-  currentLeftForce: 0
-  currentRightForce: 0
-  averageGripForce: 0
-  targetLayers:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  detectionRadius: 0.05
-  enableForceTransmission: 1
 --- !u!1001 &2108204826
 PrefabInstance:
   m_ObjectHideFlags: 0
