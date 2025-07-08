@@ -2,11 +2,12 @@ using UnityEngine;
 
 /// <summary>
 /// グリッパーとターゲット間の力伝達システム（SimpleGripForceController対応版）
+/// 完全修正版
 /// </summary>
 public class GripperTargetInterface : MonoBehaviour
 {
     [Header("連携コンポーネント")]
-    public SimpleGripForceController simpleGripperController;  // 変更点
+    public SimpleGripForceController simpleGripperController;
     public DeformableTarget target;
     
     [Header("力伝達設定")]
@@ -58,47 +59,102 @@ public class GripperTargetInterface : MonoBehaviour
         if (target == null) return;
         
         float distance = Vector3.Distance(transform.position, target.transform.position);
+        bool wasInContact = isInContact;
         isInContact = distance <= contactDetectionRadius;
         
         if (isInContact)
         {
             lastContactPoint = target.transform.position;
         }
+        
+        // 接触状態の変化をログ
+        if (enableForceLogging && isInContact != wasInContact)
+        {
+            Debug.Log($"接触状態変化: {wasInContact} → {isInContact}, 距離: {distance:F3}m");
+        }
     }
     
     private void TransferForceToTarget()
     {
-        if (!isInContact || target == null || simpleGripperController == null) return;
-        
-        // SimpleGripForceControllerから現在の力を取得
-        float currentForce = GetCurrentForceFromSimpleController() * forceTransferRate;
-        
-        // ターゲットに力を伝達
-        if (target != null)
+        // 前提条件チェック
+        if (!isInContact || target == null || simpleGripperController == null) 
         {
-            target.ApplyGripperForce(currentForce, lastContactPoint);
+            if (enableForceLogging && Time.fixedTime % 1f < Time.fixedDeltaTime)
+            {
+                Debug.Log($"力伝達スキップ - 接触:{isInContact}, Target:{target != null}, Controller:{simpleGripperController != null}");
+            }
+            return;
         }
         
-        lastForceTransferred = currentForce;
+        // SimpleGripForceControllerから現在の力を取得
+        float rawForce = GetCurrentForceFromSimpleController();
+        float currentForce = rawForce * forceTransferRate;
         
-        // ログ出力
-        if (enableForceLogging && Time.fixedTime % 0.1f < Time.fixedDeltaTime)
+        // ターゲットに力を伝達
+        if (target != null && currentForce > 0f)
         {
-            Debug.Log($"Force Transfer: {currentForce:F2}N to target object");
+            target.ApplyGripperForce(currentForce, lastContactPoint);
+            lastForceTransferred = currentForce;
+            
+            if (enableForceLogging)
+            {
+                Debug.Log($"力伝達成功 - Raw: {rawForce:F2}N, Applied: {currentForce:F2}N, Contact: {lastContactPoint}");
+            }
+        }
+        else
+        {
+            if (enableForceLogging && Time.fixedTime % 0.5f < Time.fixedDeltaTime)
+            {
+                Debug.Log($"力伝達失敗 - Force: {currentForce:F2}N, Target: {target != null}");
+            }
         }
     }
     
     /// <summary>
-    /// SimpleGripForceControllerから力を取得
+    /// SimpleGripForceControllerから力を取得（修正版）
     /// </summary>
     private float GetCurrentForceFromSimpleController()
     {
         if (simpleGripperController == null) return 0f;
         
-        // SimpleGripForceControllerの内部変数にアクセスする必要があるため
-        // 公開プロパティを追加するか、リフレクションを使用する
-        // ここでは基本値を返す（後で改善）
-        return 10f; // 仮の値
+        // SimpleGripForceControllerが有効でない場合は0を返す
+        if (!simpleGripperController.enabled) 
+        {
+            if (enableForceLogging && Time.fixedTime % 2f < Time.fixedDeltaTime)
+                Debug.Log("SimpleGripForceController が無効です");
+            return 0f;
+        }
+        
+        // 力制御システムから実際の力を取得
+        try
+        {
+            // 新しく追加予定のメソッドを使用
+            if (HasMethod(simpleGripperController, "GetCurrentTargetForce"))
+            {
+                return simpleGripperController.GetCurrentTargetForce();
+            }
+            else
+            {
+                // フォールバック: 基本力を返す
+                return simpleGripperController.GetBaseGripForce();
+            }
+        }
+        catch (System.Exception e)
+        {
+            if (enableForceLogging)
+                Debug.LogWarning($"力取得エラー: {e.Message}");
+            
+            // フォールバック: 基本力を返す
+            return simpleGripperController.baseGripForce;
+        }
+    }
+    
+    /// <summary>
+    /// メソッドの存在確認用ヘルパー
+    /// </summary>
+    private bool HasMethod(object obj, string methodName)
+    {
+        return obj.GetType().GetMethod(methodName) != null;
     }
     
     /// <summary>
@@ -120,7 +176,7 @@ public class GripperTargetInterface : MonoBehaviour
             appliedForce = objectState.appliedForce,
             deformation = objectState.deformation,
             isBroken = objectState.isBroken,
-            confidence = 0.8f // 仮の値
+            confidence = CalculateConfidence(objectState)
         };
     }
     
@@ -133,37 +189,96 @@ public class GripperTargetInterface : MonoBehaviour
         // 把持力による判定
         float force = objectState.appliedForce;
         
-        if (force < 1f)
+        // 材質に応じた閾値
+        float successMin = GetSuccessForceMin(objectState.materialType);
+        float successMax = GetSuccessForceMax(objectState.materialType);
+        float overGripThreshold = GetOverGripThreshold(objectState.materialType);
+        
+        if (force < successMin)
             return GraspResult.UnderGrip;
-        else if (force > 50f)
+        else if (force > overGripThreshold)
             return GraspResult.OverGrip;
-        else
+        else if (force >= successMin && force <= successMax)
             return GraspResult.Success;
+        else
+            return GraspResult.Failure;
     }
     
+    // 材質別の力閾値設定
+    private float GetSuccessForceMin(DeformableTarget.MaterialType material)
+    {
+        return material switch
+        {
+            DeformableTarget.MaterialType.Soft => 2f,
+            DeformableTarget.MaterialType.Medium => 5f,
+            DeformableTarget.MaterialType.Hard => 8f,
+            DeformableTarget.MaterialType.Fragile => 1f,
+            _ => 5f
+        };
+    }
+    
+    private float GetSuccessForceMax(DeformableTarget.MaterialType material)
+    {
+        return material switch
+        {
+            DeformableTarget.MaterialType.Soft => 15f,
+            DeformableTarget.MaterialType.Medium => 25f,
+            DeformableTarget.MaterialType.Hard => 40f,
+            DeformableTarget.MaterialType.Fragile => 8f,
+            _ => 25f
+        };
+    }
+    
+    private float GetOverGripThreshold(DeformableTarget.MaterialType material)
+    {
+        return material switch
+        {
+            DeformableTarget.MaterialType.Soft => 20f,
+            DeformableTarget.MaterialType.Medium => 35f,
+            DeformableTarget.MaterialType.Hard => 60f,
+            DeformableTarget.MaterialType.Fragile => 12f,
+            _ => 35f
+        };
+    }
+    
+    private float CalculateConfidence(DeformableTarget.ObjectState objectState)
+    {
+        // 力の安定性、変形の一貫性などから信頼度を計算
+        float forceStability = objectState.appliedForce > 0 ? 0.8f : 0.4f;
+        float deformationConsistency = 1f - Mathf.Abs(objectState.deformation - 0.5f);
+        
+        return (forceStability + deformationConsistency) / 2f;
+    }
+    
+    // デバッグ表示
     void OnDrawGizmos()
     {
-        if (showForceGizmos && isInContact)
+        if (!showForceGizmos) return;
+        
+        // 接触範囲の表示
+        Gizmos.color = isInContact ? Color.green : Color.yellow;
+        Gizmos.DrawWireSphere(transform.position, contactDetectionRadius);
+        
+        // 力の可視化
+        if (isInContact && lastForceTransferred > 0)
         {
             Gizmos.color = Color.red;
-            Gizmos.DrawWireSphere(lastContactPoint, 0.05f);
-            Gizmos.DrawLine(transform.position, lastContactPoint);
+            Vector3 forceDirection = (lastContactPoint - transform.position).normalized;
+            Gizmos.DrawRay(transform.position, forceDirection * lastForceTransferred * 0.1f);
         }
-        
-        Gizmos.color = Color.yellow;
-        Gizmos.DrawWireSphere(transform.position, contactDetectionRadius);
     }
 }
 
-// 必要な列挙型とクラス
+// 把持評価結果
 public enum GraspResult
 {
-    Success,
-    UnderGrip,
-    OverGrip,
-    Failure
+    Success,   // 成功
+    OverGrip,  // 過把持
+    UnderGrip, // 不足把持
+    Failure    // 失敗
 }
 
+[System.Serializable]
 public class GraspEvaluation
 {
     public GraspResult result;

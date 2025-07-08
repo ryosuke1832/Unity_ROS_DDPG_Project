@@ -5097,12 +5097,12 @@ MonoBehaviour:
   simpleGripperController: {fileID: 1124406058}
   target: {fileID: 1119675932}
   forceTransferRate: 1
-  contactDetectionRadius: 0.1
+  contactDetectionRadius: 0.5
   targetLayer:
     serializedVersion: 2
     m_Bits: 4294967295
   showForceGizmos: 1
-  enableForceLogging: 0
+  enableForceLogging: 1
 --- !u!114 &853727497
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -6045,7 +6045,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 55eac04ed9670cc42bba9f8fbfce8d70, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  softness: 0.352
+  softness: 0.8
   maxDeformation: 0.3
   deformationSpeed: 2
   enableVisualDeformation: 1
@@ -6056,7 +6056,7 @@ MonoBehaviour:
   originalColor: {r: 1, g: 1, b: 1, a: 1}
   stressColor: {r: 1, g: 0, b: 0, a: 1}
   brokenColor: {r: 0.5, g: 0.5, b: 0.5, a: 1}
-  enableDebugLogs: 0
+  enableDebugLogs: 1
   showContactGizmos: 1
 --- !u!1 &1124406057
 GameObject:

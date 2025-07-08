@@ -373,6 +373,50 @@ public class SimpleGripForceController : MonoBehaviour
         
         GUILayout.EndArea();
     }
+
+    // SimpleGripForceController.cs に追加するメソッド
+
+/// <summary>
+/// 現在の目標力を取得（外部アクセス用）
+/// </summary>
+public float GetCurrentTargetForce()
+{
+    return currentTargetForce;
+}
+
+/// <summary>
+/// 基本把持力を取得（外部アクセス用）
+/// </summary>
+public float GetBaseGripForce()
+{
+    return baseGripForce;
+}
+
+/// <summary>
+/// 把持状態の簡易情報を取得
+/// </summary>
+public GraspingStateInfo GetGraspingStateInfo()
+{
+    return new GraspingStateInfo
+    {
+        currentForce = currentTargetForce,
+        baseForce = baseGripForce,
+        isEnabled = enabled,
+        controlMode = controlMode.ToString()
+    };
+}
+
+/// <summary>
+/// 把持状態の情報構造体
+/// </summary>
+[System.Serializable]
+public struct GraspingStateInfo
+{
+    public float currentForce;
+    public float baseForce;
+    public bool isEnabled;
+    public string controlMode;
+}
 }
 
 /// <summary>
