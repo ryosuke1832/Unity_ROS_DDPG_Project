@@ -2787,6 +2787,55 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e9090ae501ff9cd459bec5271d40249c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+--- !u!1 &757340083
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 757340085}
+  - component: {fileID: 757340084}
+  m_Layer: 0
+  m_Name: Diagnostics
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &757340084
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 757340083}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9957aa392259aa744b7b35c97e37b824, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  enableContinuousDiagnostics: 1
+  diagnosticInterval: 2
+  trajectoryPlannerDeform: {fileID: 853727501}
+  target: {fileID: 1119675932}
+  forceController: {fileID: 1124406058}
+  gripperInterface: {fileID: 1279036587}
+--- !u!4 &757340085
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 757340083}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 9.624437, y: -8.787994, z: -20.209517}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_RootOrder: 12
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1001 &762454849
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -2937,9 +2986,9 @@ MonoBehaviour:
   m_OnClick:
     m_PersistentCalls:
       m_Calls:
-      - m_Target: {fileID: 853727500}
-        m_TargetAssemblyTypeName: TrajectoryPlanner, Unity.Robotics.PickAndPlace
-        m_MethodName: PublishJoints
+      - m_Target: {fileID: 853727501}
+        m_TargetAssemblyTypeName: TrajectoryPlannerDeform, Unity.Robotics.PickAndPlace
+        m_MethodName: PublishJointsWithDeformation
         m_Mode: 1
         m_Arguments:
           m_ObjectArgument: {fileID: 0}
@@ -5025,6 +5074,7 @@ GameObject:
   - component: {fileID: 853727500}
   - component: {fileID: 853727499}
   - component: {fileID: 853727496}
+  - component: {fileID: 853727501}
   m_Layer: 0
   m_Name: Publisher
   m_TagString: Untagged
@@ -5125,6 +5175,23 @@ MonoBehaviour:
   m_NiryoOne: {fileID: 366141394}
   m_Target: {fileID: 1119675931}
   m_TargetPlacement: {fileID: 641611905}
+--- !u!114 &853727501
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 853727495}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9606806690f54de42a1986f948f93d2c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  gripperInterface: {fileID: 1279036587}
+  target: {fileID: 1119675932}
+  forceController: {fileID: 1124406058}
+  graspEvaluationDelay: 1
+  enableDeformationLogging: 1
 --- !u!1 &872258657
 GameObject:
   m_ObjectHideFlags: 0

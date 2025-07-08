@@ -10,7 +10,7 @@ public class SimpleGripForceController : MonoBehaviour
 {
     [Header("=== 基本把持力設定 ===")]
     [SerializeField, Range(0.1f, 100f), Tooltip("基本的な把持力(N)")]
-    private float baseGripForce = 10f;
+    public float baseGripForce = 10f;
     
     [SerializeField, Range(0f, 1f), Tooltip("把持力のばらつき度合い")]
     private float forceVariability = 0.1f;
@@ -20,7 +20,7 @@ public class SimpleGripForceController : MonoBehaviour
     
     [Header("=== 高度な制御設定 ===")]
     [SerializeField, Tooltip("適応制御を有効にする")]
-    private bool enableAdaptiveControl = true;
+    public bool enableAdaptiveControl = true;
     
     [SerializeField, Range(0f, 1f), Tooltip("適応制御の強さ")]
     private float adaptiveGain = 0.5f;
@@ -36,7 +36,7 @@ public class SimpleGripForceController : MonoBehaviour
     private float noiseStrength = 0.1f;
     
     [SerializeField, Tooltip("制御モード")]
-    private GripControlMode controlMode = GripControlMode.Standard;
+    public GripControlMode controlMode = GripControlMode.Standard;
     
     [Header("=== プリセット選択 ===")]
     [SerializeField, Tooltip("事前定義されたプリセットを使用")]

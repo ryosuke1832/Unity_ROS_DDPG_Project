@@ -35,6 +35,9 @@ public class TrajectoryPlannerDeform : MonoBehaviour
         }
         
         InitializeDeformationSystem();
+        
+        // グリッパーの動作監視を開始
+        StartCoroutine(MonitorGripperMovement());
     }
     
     private void InitializeDeformationSystem()
@@ -157,6 +160,14 @@ public class TrajectoryPlannerDeform : MonoBehaviour
         // まず変形システムを準備
         PrepareDeformationSystem();
         
+        // 力制御を有効化（把持動作前に準備）
+        if (forceController != null)
+        {
+            forceController.enabled = true;
+            if (enableDeformationLogging)
+                Debug.Log("力制御システムを有効化しました");
+        }
+        
         // 元のPublishJointsを実行
         originalTrajectoryPlanner.PublishJoints();
     }
@@ -229,5 +240,68 @@ public class TrajectoryPlannerDeform : MonoBehaviour
     public void OnGraspPhaseEnded()
     {
         StopGraspWithDeformation();
+    }
+    
+    /// <summary>
+    /// グリッパーの動作を監視して自動的に力制御を管理
+    /// </summary>
+    private IEnumerator MonitorGripperMovement()
+    {
+        // グリッパーのArticulationBodyを探す
+        ArticulationBody leftGripper = null;
+        ArticulationBody rightGripper = null;
+        
+        yield return new WaitForSeconds(1f); // 初期化待ち
+        
+        // グリッパーを検索
+        ArticulationBody[] allBodies = FindObjectsOfType<ArticulationBody>();
+        foreach (var body in allBodies)
+        {
+            if (body.name.Contains("left_gripper"))
+                leftGripper = body;
+            if (body.name.Contains("right_gripper"))
+                rightGripper = body;
+        }
+        
+        if (leftGripper == null || rightGripper == null)
+        {
+            if (enableDeformationLogging)
+                Debug.LogWarning("グリッパーのArticulationBodyが見つかりません");
+            yield break;
+        }
+        
+        float previousLeftTarget = leftGripper.xDrive.target;
+        float previousRightTarget = rightGripper.xDrive.target;
+        bool wasGrasping = false;
+        
+        while (true)
+        {
+            yield return new WaitForSeconds(0.1f);
+            
+            float currentLeftTarget = leftGripper.xDrive.target;
+            float currentRightTarget = rightGripper.xDrive.target;
+            
+            // グリッパーが閉じる動作を検出（目標値の変化で判定）
+            bool isCurrentlyGrasping = (currentLeftTarget < -0.005f && currentRightTarget > 0.005f);
+            
+            if (isCurrentlyGrasping && !wasGrasping)
+            {
+                // 把持開始を検出
+                if (enableDeformationLogging)
+                    Debug.Log("グリッパー閉じ動作を検出 - 力制御開始");
+                StartGraspWithDeformation();
+            }
+            else if (!isCurrentlyGrasping && wasGrasping)
+            {
+                // 把持終了を検出
+                if (enableDeformationLogging)
+                    Debug.Log("グリッパー開き動作を検出 - 力制御終了");
+                StopGraspWithDeformation();
+            }
+            
+            wasGrasping = isCurrentlyGrasping;
+            previousLeftTarget = currentLeftTarget;
+            previousRightTarget = currentRightTarget;
+        }
     }
 }
