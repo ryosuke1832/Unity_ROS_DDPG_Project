@@ -65,23 +65,17 @@ public class GripperContactDetector : MonoBehaviour
     {
         if (!isInitialized || parentInterface == null) return;
         
-        // トリガーの場合は衝突情報を作成
         if (enableContactLogs)
         {
             Debug.Log($"{(isLeftGripper ? "LEFT" : "RIGHT")} gripper trigger ENTER with {other.gameObject.name}");
         }
         
-        // 簡易的な衝突情報を作成（実際の衝突がない場合の代替）
-        ContactPoint contactPoint = new ContactPoint();
-        contactPoint.point = other.ClosestPoint(transform.position);
-        contactPoint.normal = (transform.position - other.transform.position).normalized;
+        // 簡易的な接触情報を作成
+        Vector3 contactPoint = other.ClosestPoint(transform.position);
+        Vector3 contactNormal = (transform.position - other.transform.position).normalized;
         
-        Collision fakeCollision = new Collision();
-        // Unityの内部構造上、直接Collisionを作成することはできないため、
-        // より簡単な代替手段を使用
-        
-        // 代替案：直接parentInterfaceのメソッドを呼び出し
-        parentInterface.OnGripperContactWithCollider(other, isLeftGripper, contactPoint.point, contactPoint.normal);
+        // 直接parentInterfaceのメソッドを呼び出し
+        parentInterface.OnGripperContactWithCollider(other, isLeftGripper, contactPoint, contactNormal);
     }
     
     /// <summary>

@@ -384,6 +384,12 @@ public float GetCurrentTargetForce()
     return currentTargetForce;
 }
 
+public GraspingState GetGraspingStateForInterface()
+{
+    // 既存のGraspingState構造体を使用
+    // 上記コードを参照
+}
+
 /// <summary>
 /// 現在の実際の力を取得
 /// </summary>
@@ -566,6 +572,119 @@ public struct GraspingStateInfo
     public bool isEnabled;
     public string controlMode;
 }
+
+// SimpleGripForceController.cs の末尾（最後の } の前）に以下を追加してください
+
+    /// <summary>
+    /// 現在のターゲット力を取得（外部アクセス用）
+    /// </summary>
+    public float GetCurrentTargetForce()
+    {
+        return currentTargetForce;
+    }
+
+    /// <summary>
+    /// SimpleGripForceController用の把持状態取得
+    /// 既存のGraspingStateと互換性を保つ
+    /// </summary>
+    public GraspingState GetGraspingStateForInterface()
+    {
+        GraspingState state = new GraspingState();
+        
+        if (gripperController != null)
+        {
+            try 
+            {
+                // 既存のGripperForceControllerから状態を取得
+                var existingState = gripperController.GetGraspingState();
+                state.isGrasping = existingState.isGrasping;
+                state.currentForce = existingState.currentForce;
+                state.targetForce = existingState.targetForce;
+                state.gripperPosition = existingState.gripperPosition;
+                state.isSuccessful = existingState.isSuccessful;
+                state.softness = existingState.softness;
+            }
+            catch
+            {
+                // フォールバック
+                state.isGrasping = currentTargetForce > 1f;
+                state.currentForce = currentTargetForce;
+                state.targetForce = baseGripForce;
+                state.gripperPosition = 0f;
+                state.isSuccessful = state.isGrasping && currentTargetForce < 50f;
+                state.softness = 0.5f;
+            }
+        }
+        else
+        {
+            // GripperForceControllerがない場合の簡易状態
+            state.isGrasping = currentTargetForce > 1f;
+            state.currentForce = currentTargetForce;
+            state.targetForce = baseGripForce;
+            state.gripperPosition = 0f;
+            state.isSuccessful = state.isGrasping && currentTargetForce < 50f;
+            state.softness = 0.5f;
+        }
+        
+        return state;
+    }
+
+    /// <summary>
+    /// 力制御を手動で有効/無効にする
+    /// </summary>
+    public void SetForceControlEnabled(bool enabled)
+    {
+        this.enabled = enabled;
+        
+        if (enableDataRecording)
+        {
+            Debug.Log($"SimpleGripForceController: Force control {(enabled ? "ENABLED" : "DISABLED")}");
+        }
+    }
+
+    /// <summary>
+    /// 外部から基本把持力を設定
+    /// </summary>
+    public void SetBaseGripForce(float force)
+    {
+        baseGripForce = Mathf.Clamp(force, 0.1f, 100f);
+        currentTargetForce = baseGripForce;
+        
+        if (enableDataRecording)
+        {
+            Debug.Log($"Base grip force set to: {baseGripForce:F2}N");
+        }
+    }
+
+    /// <summary>
+    /// 現在の制御モードを取得
+    /// </summary>
+    public string GetCurrentControlMode()
+    {
+        return controlMode.ToString();
+    }
+
+    /// <summary>
+    /// グリッパーが閉じている状態かどうかを判定
+    /// </summary>
+    public bool IsGripperClosed()
+    {
+        if (gripperController == null) 
+        {
+            // フォールバック：力が一定以上なら閉じていると判定
+            return currentTargetForce > 2f;
+        }
+        
+        try 
+        {
+            var graspState = gripperController.GetGraspingState();
+            return graspState.isGrasping;
+        }
+        catch
+        {
+            return currentTargetForce > 2f;
+        }
+    }
 }
 
 /// <summary>

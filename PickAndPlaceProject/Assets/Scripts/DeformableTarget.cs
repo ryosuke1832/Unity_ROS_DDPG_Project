@@ -343,51 +343,6 @@ public class DeformableTarget : MonoBehaviour
             Debug.Log($"Material changed to: {materialType}");
     }
     
-    /// <summary>
-    /// オブジェクトをリセット
-    /// </summary>
-    public void ResetObject()
-    {
-        isBroken = false;
-        currentDeformation = 0f;
-        appliedForce = 0f;
-        isBeingGrasped = false;
-        contactPoints.Clear();
-        
-        transform.localScale = originalScale;
-        
-        if (objectRenderer != null)
-            objectRenderer.material.color = originalColor;
-            
-        if (rb != null)
-        {
-            rb.velocity = Vector3.zero;
-            rb.angularVelocity = Vector3.zero;
-            rb.constraints = RigidbodyConstraints.None;
-        }
-        
-        if (enableDebugLogs)
-            Debug.Log("Object reset");
-    }
-    
-    /// <summary>
-    /// 現在の状態を取得（将来のEEG/DDPG用）
-    /// </summary>
-    public ObjectState GetCurrentState()
-    {
-        return new ObjectState
-        {
-            deformation = currentDeformation,
-            appliedForce = appliedForce,
-            isBroken = isBroken,
-            isBeingGrasped = isBeingGrasped,
-            materialType = materialType,
-            softness = softness,
-            position = transform.position,
-            rotation = transform.rotation,
-            scale = transform.localScale
-        };
-    }
     
     // イベント
     public System.Action OnObjectBroken;
@@ -582,19 +537,6 @@ public ContactInfo? GetLatestContact()
     return contactPoints[contactPoints.Count - 1];
 }
     
-    [System.Serializable]
-    public struct ObjectState
-    {
-        public float deformation;
-        public float appliedForce;
-        public bool isBroken;
-        public bool isBeingGrasped;
-        public MaterialType materialType;
-        public float softness;
-        public Vector3 position;
-        public Quaternion rotation;
-        public Vector3 scale;
-    }
     
     // デバッグ表示
     void OnDrawGizmos()
@@ -629,4 +571,158 @@ public ContactInfo? GetLatestContact()
             ApplyMaterialPreset(materialType);
         }
     }
+
+    // DeformableTarget.cs の末尾（最後の } の前）に以下を追加してください
+
+    /// <summary>
+    /// 状態の詳細情報を文字列で取得（既存メソッドと名前が重複しないように）
+    /// </summary>
+    public string GetDetailedStateInfo()
+    {
+        var state = GetCurrentState();
+        return $"Deformation: {state.deformation:F3}, Force: {state.appliedForce:F1}N, " +
+               $"Material: {state.materialType}, " +
+               $"Broken: {state.isBroken}, Grasped: {state.isBeingGrasped}";
+    }
+
+    /// <summary>
+    /// 変形の進行度を取得（アニメーション用）
+    /// </summary>
+    public float GetDeformationProgress()
+    {
+        return Mathf.Clamp01(currentDeformation / maxDeformation);
+    }
+
+    /// <summary>
+    /// 材質プリセットを動的に変更
+    /// </summary>
+    public void ChangeMaterialType(MaterialType newMaterialType)
+    {
+        materialType = newMaterialType;
+        ApplyMaterialPreset(newMaterialType);
+        
+        if (enableDebugLogs)
+        {
+            Debug.Log($"Material type changed to: {newMaterialType}");
+        }
+    }
+
+    /// <summary>
+    /// 接触点の詳細情報を取得（既存メソッドと名前が重複しないように）
+    /// </summary>
+    public ContactInfo[] GetAllContactPoints()
+    {
+        return contactPoints.ToArray();
+    }
+
+    /// <summary>
+    /// 最新の接触情報を取得（既存メソッドと名前が重複しないように）
+    /// </summary>
+    public ContactInfo? GetLatestContactInfo()
+    {
+        if (contactPoints.Count == 0) return null;
+        return contactPoints[contactPoints.Count - 1];
+    }
+
+    /// <summary>
+    /// 方向を考慮した力適用メソッド（オーバーロード）
+    /// </summary>
+    public void ApplyGripperForceWithDirection(float force, Vector3 contactPosition, Vector3 contactNormal)
+    {
+        if (isBroken) return;
+        
+        appliedForce = force;
+        isBeingGrasped = force > 0.1f;
+        
+        // 既存のContactInfoを使用
+        var contact = new ContactInfo
+        {
+            position = contactPosition,
+            force = force,
+            timestamp = Time.time
+        };
+        contactPoints.Add(contact);
+        
+        // 破損チェック
+        if (force > breakingForce)
+        {
+            BreakObject();
+        }
+        
+        // 方向を考慮した変形の計算
+        CalculateDirectionalDeformation(force, contactNormal);
+        
+        if (enableDebugLogs)
+            Debug.Log($"Directional force applied: {force:F2}N at {contactPosition}, Normal: {contactNormal}, Deformation: {currentDeformation:F3}");
+    }
+
+    /// <summary>
+    /// 方向を考慮した変形計算（新規メソッド）
+    /// </summary>
+    private void CalculateDirectionalDeformation(float force, Vector3 contactNormal)
+    {
+        // 材質の柔軟性に基づく変形計算
+        float baseDeformation = Mathf.Clamp01(force / compressionResistance) * softness;
+        
+        // 接触法線の方向を考慮した変形係数
+        // Y軸（上下）からの圧縮が最も効果的
+        float directionFactor = Mathf.Abs(Vector3.Dot(contactNormal, Vector3.up));
+        directionFactor = Mathf.Clamp(directionFactor, 0.3f, 1f); // 最小30%の効果は保持
+        
+        float targetDeformation = baseDeformation * directionFactor;
+        targetDeformation = Mathf.Clamp(targetDeformation, 0f, maxDeformation);
+        
+        // 滑らかな変形
+        currentDeformation = Mathf.Lerp(currentDeformation, targetDeformation, 
+                                      deformationSpeed * Time.deltaTime);
+    }
+
+    /// <summary>
+    /// 破損状態を強制的に設定
+    /// </summary>
+    public void SetBrokenState(bool broken)
+    {
+        isBroken = broken;
+        
+        if (broken)
+        {
+            BreakObject();
+        }
+        else
+        {
+            // 破損状態から復旧
+            if (objectRenderer != null && objectRenderer.material != null)
+            {
+                objectRenderer.material.color = originalColor;
+            }
+        }
+    }
+
+// また、既存のContactInfoが拡張できない場合のため、以下の新しい構造体を追加
+/// <summary>
+/// 法線情報付きの接触情報（ContactInfoの拡張版）
+/// </summary>
+[System.Serializable]
+public struct ExtendedContactInfo
+{
+    public Vector3 position;
+    public Vector3 normal;      // 新規追加：法線
+    public float force;
+    public float timestamp;
+    
+    /// <summary>
+    /// 既存のContactInfoから変換
+    /// </summary>
+    public static ExtendedContactInfo FromContactInfo(ContactInfo original, Vector3 normal)
+    {
+        return new ExtendedContactInfo
+        {
+            position = original.position,
+            normal = normal,
+            force = original.force,
+            timestamp = original.timestamp
+        };
+    }
+}
+
 }
