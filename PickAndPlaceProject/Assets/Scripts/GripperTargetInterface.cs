@@ -13,7 +13,7 @@ public class GripperTargetInterface : MonoBehaviour
     public ArticulationBody rightGripperBody;
     
     [Header("接触判定設定")]
-    public float gripperCloseThreshold = 0.005f;
+    public float gripperCloseThreshold = 0.001f;
     public float contactForceThreshold = 0.5f;
     public bool requireBothGrippersContact = true;
     
@@ -99,7 +99,7 @@ public class GripperTargetInterface : MonoBehaviour
         {
             BoxCollider triggerCollider = gripperObject.AddComponent<BoxCollider>();
             triggerCollider.isTrigger = true;
-            triggerCollider.size = Vector3.one * 0.05f;
+            triggerCollider.size = Vector3.one * 0.15f;
             
             if (enableDetailedLogging)
                 Debug.Log($"Added trigger to {(isLeft ? "left" : "right")} gripper");
@@ -129,9 +129,9 @@ public class GripperTargetInterface : MonoBehaviour
         
         // グリッパーが閉じているかチェック
         bool wasGripperClosed = isGripperClosed;
-        bool leftClosed = currentLeftPosition < -gripperCloseThreshold;
-        bool rightClosed = currentRightPosition > gripperCloseThreshold;
-        isGripperClosed = leftClosed && rightClosed;
+        bool leftClosed = Mathf.Abs(currentLeftPosition) > gripperCloseThreshold;
+        bool rightClosed = Mathf.Abs(currentRightPosition) > gripperCloseThreshold;
+        isGripperClosed = leftClosed || rightClosed; // どちらかが動いていれば閉じているとみなす
         
         // 状態変化をログ
         if (enableDetailedLogging && wasGripperClosed != isGripperClosed)
@@ -197,31 +197,130 @@ public class GripperTargetInterface : MonoBehaviour
         
         return target.transform.position;
     }
+
+    private Vector3 leftContactNormal = Vector3.zero;
+    private Vector3 rightContactNormal = Vector3.zero;
+    private bool hasLoggedForceTransfer = false; // 力伝達ログ制御用
     
-    // 外部から呼び出される接触イベント
-    public void OnGripperContactEnter(Collider collider, bool isLeftGripper, Vector3 contactPoint, Vector3 contactNormal)
-    {
-        if (collider.gameObject != target.gameObject) return;
-        
-        if (isLeftGripper)
+        // OnGripperContactEnter メソッドを修正（ログを削除）
+        public void OnGripperContactEnter(Collider collider, bool isLeftGripper, Vector3 contactPoint, Vector3 contactNormal)
         {
-            leftGripperInContact = true;
-            leftContactPoint = contactPoint;
+            if (collider.gameObject != target.gameObject) return;
+            
+            if (isLeftGripper)
+            {
+                leftGripperInContact = true;
+                leftContactPoint = contactPoint;
+                leftContactNormal = contactNormal;
+            }
+            else
+            {
+                rightGripperInContact = true;
+                rightContactPoint = contactPoint;
+                rightContactNormal = contactNormal;
+            }
+            
+            // 複合接触法線を計算（ログなし）
+            CalculateAggregateContactNormal();
+            
+            // 簡単な接触ログのみ
+            if (enableDetailedLogging)
+            {
+                Debug.Log($"{(isLeftGripper ? "Left" : "Right")} gripper contact ENTER");
+            }
         }
-        else
+        
+        // 複合接触法線計算（ログなし）
+        private void CalculateAggregateContactNormal()
         {
-            rightGripperInContact = true;
-            rightContactPoint = contactPoint;
+            Vector3 aggregateNormal = Vector3.zero;
+            int contactCount = 0;
+            
+            if (leftGripperInContact)
+            {
+                aggregateNormal += leftContactNormal;
+                contactCount++;
+            }
+            
+            if (rightGripperInContact)
+            {
+                aggregateNormal += rightContactNormal;
+                contactCount++;
+            }
+            
+            if (contactCount > 0)
+            {
+                lastContactNormal = (aggregateNormal / contactCount).normalized;
+            }
         }
         
-        lastContactNormal = contactNormal;
-        
-        if (enableDetailedLogging)
+        // OnGripperContactExit（ログ削除）
+        public void OnGripperContactExit(Collider collider, bool isLeftGripper)
         {
-            Debug.Log($"{(isLeftGripper ? "Left" : "Right")} gripper contact ENTER");
+            if (collider.gameObject != target.gameObject) return;
+            
+            if (isLeftGripper)
+            {
+                leftGripperInContact = false;
+                leftContactNormal = Vector3.zero;
+            }
+            else
+            {
+                rightGripperInContact = false;
+                rightContactNormal = Vector3.zero;
+            }
+            
+            CalculateAggregateContactNormal();
+            
+            if (enableDetailedLogging)
+            {
+                Debug.Log($"{(isLeftGripper ? "Left" : "Right")} gripper contact EXIT");
+            }
+        }
+        
+        // TransferForceToTarget（力伝達時のみ詳細ログ）
+        private void TransferForceToTarget()
+        {
+            if (target == null || simpleGripperController == null) return;
+            
+            bool canTransferForce = isGripperClosed && HasValidContact();
+            
+            if (!canTransferForce)
+            {
+                hasLoggedForceTransfer = false; // リセット
+                return;
+            }
+            
+            float currentForce = simpleGripperController.GetCurrentTargetForce();
+            
+            if (currentForce >= contactForceThreshold)
+            {
+                Vector3 contactPoint = CalculateContactPoint();
+                
+                // 力伝達開始時に一度だけ詳細ログを出力
+                if (!hasLoggedForceTransfer)
+                {
+                    Debug.Log($"=== FORCE TRANSFER STARTED ===");
+                    Debug.Log($"Using contact normal: {lastContactNormal}");
+                    Debug.Log($"Left normal: {leftContactNormal}");
+                    Debug.Log($"Right normal: {rightContactNormal}");
+                    Debug.Log($"Aggregate X component: {Mathf.Abs(Vector3.Dot(lastContactNormal, Vector3.right)):F3}");
+                    Debug.Log($"Aggregate Y component: {Mathf.Abs(Vector3.Dot(lastContactNormal, Vector3.up)):F3}");
+                    Debug.Log($"Aggregate Z component: {Mathf.Abs(Vector3.Dot(lastContactNormal, Vector3.forward)):F3}");
+                    Debug.Log($"Contact point: {contactPoint}");
+                    Debug.Log($"Force: {currentForce:F2}N");
+                    hasLoggedForceTransfer = true;
+                }
+                
+                // 方向を考慮した力伝達
+                target.ApplyGripperForceWithDirection(currentForce, contactPoint, lastContactNormal);
+            }
+            else
+            {
+                hasLoggedForceTransfer = false; // 力が閾値以下になったらリセット
+            }
         }
     }
-    
     public void OnGripperContactExit(Collider collider, bool isLeftGripper)
     {
         if (collider.gameObject != target.gameObject) return;
@@ -238,6 +337,7 @@ public class GripperTargetInterface : MonoBehaviour
         if (enableDetailedLogging)
         {
             Debug.Log($"{(isLeftGripper ? "Left" : "Right")} gripper contact EXIT");
+            Debug.Log($"Contact state - Left: {leftGripperInContact}, Right: {rightGripperInContact}");
         }
     }
     
@@ -289,6 +389,18 @@ public class GripperTargetInterface : MonoBehaviour
         if (target == null || simpleGripperController == null)
             return GraspEvaluation.CreateSimple(GraspResult.Failure);
         
+        // **デバッグ情報を詳細に出力**
+        if (enableDetailedLogging)
+        {
+            Debug.Log($"=== 詳細評価ログ ===");
+            Debug.Log($"Left gripper in contact: {leftGripperInContact}");
+            Debug.Log($"Right gripper in contact: {rightGripperInContact}");
+            Debug.Log($"Require both grippers: {requireBothGrippersContact}");
+            Debug.Log($"Is gripper closed: {isGripperClosed}");
+            Debug.Log($"Left position: {currentLeftPosition:F4}, threshold: {-gripperCloseThreshold}");
+            Debug.Log($"Right position: {currentRightPosition:F4}, threshold: {gripperCloseThreshold}");
+        }
+        
         // ターゲットの現在状態を取得
         ObjectState objectState = target.GetCurrentState();
         
@@ -298,6 +410,13 @@ public class GripperTargetInterface : MonoBehaviour
         // 接触の有効性をチェック
         bool hasValidContact = HasValidContact();
         bool isGripping = isGripperClosed && hasValidContact;
+        
+        // **詳細デバッグ**
+        if (enableDetailedLogging)
+        {
+            Debug.Log($"Has valid contact: {hasValidContact}");
+            Debug.Log($"Is gripping: {isGripping}");
+        }
         
         // 把持結果を判定
         GraspResult result = DetermineGraspResult(objectState, graspingState, isGripping);
@@ -318,7 +437,7 @@ public class GripperTargetInterface : MonoBehaviour
         if (enableDetailedLogging)
         {
             Debug.Log($"Grasp Evaluation: {result}, Force: {objectState.appliedForce:F2}N, " +
-                     $"Deformation: {objectState.deformation:F3}, Confidence: {evaluation.confidence:F2}");
+                    $"Deformation: {objectState.deformation:F3}, Confidence: {evaluation.confidence:F2}");
         }
         
         return evaluation;
@@ -393,9 +512,9 @@ private bool IsGripperInClosedState()
     return leftClosed && rightClosed;
 }
 
-}
 
-// シンプルな接触検出コンポーネント
+
+// SimpleContactDetector も修正（デバッグログを削除）
 public class SimpleContactDetector : MonoBehaviour
 {
     private GripperTargetInterface parentInterface;
@@ -412,15 +531,15 @@ public class SimpleContactDetector : MonoBehaviour
         if (parentInterface == null) return;
         
         Vector3 contactPoint = other.ClosestPoint(transform.position);
-        Vector3 contactNormal = (transform.position - other.transform.position).normalized;
+        Vector3 contactNormal = (other.transform.position - transform.position).normalized;
         
+        // デバッグログを削除し、直接コールバック
         parentInterface.OnGripperContactEnter(other, isLeftGripper, contactPoint, contactNormal);
     }
     
     void OnTriggerExit(Collider other)
     {
         if (parentInterface == null) return;
-        
         parentInterface.OnGripperContactExit(other, isLeftGripper);
     }
 }
