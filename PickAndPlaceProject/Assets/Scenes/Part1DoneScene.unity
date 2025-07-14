@@ -1570,9 +1570,9 @@ ArticulationBody:
   m_Enabled: 1
   m_Mass: 1
   m_ParentAnchorPosition: {x: -0.0000000017488051, y: 0.0073003806, z: 9.313227e-10}
-  m_ParentAnchorRotation: {x: 0.000000059604645, y: 0.70710725, z: 0.70710725, w: -0.000000059604645}
+  m_ParentAnchorRotation: {x: 0.000000059604645, y: 0.7071072, z: 0.7071072, w: -0.000000059604645}
   m_AnchorPosition: {x: 0, y: 0, z: 0}
-  m_AnchorRotation: {x: 0, y: 0, z: 0.7071068, w: 0.7071068}
+  m_AnchorRotation: {x: 0, y: 0, z: 0.70710677, w: 0.70710677}
   m_ComputeParentAnchor: 1
   m_ArticulationJointType: 0
   m_LinearX: 2
@@ -2440,9 +2440,9 @@ ArticulationBody:
   m_Enabled: 1
   m_Mass: 1
   m_ParentAnchorPosition: {x: -4.3192113e-11, y: -0.00000044703484, z: 4.3028695e-11}
-  m_ParentAnchorRotation: {x: 0.0000000842937, y: 0.0000000842937, z: 0.7071071, w: 0.70710725}
+  m_ParentAnchorRotation: {x: 0.000000084293696, y: 0.000000084293696, z: 0.70710707, w: 0.7071072}
   m_AnchorPosition: {x: 0, y: 0, z: 0}
-  m_AnchorRotation: {x: 0, y: 0, z: 0.7071068, w: 0.7071068}
+  m_AnchorRotation: {x: 0, y: 0, z: 0.70710677, w: 0.70710677}
   m_ComputeParentAnchor: 1
   m_ArticulationJointType: 0
   m_LinearX: 2
@@ -2816,12 +2816,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9957aa392259aa744b7b35c97e37b824, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  enableContinuousDiagnostics: 1
-  diagnosticInterval: 2
-  trajectoryPlannerDeform: {fileID: 853727501}
-  target: {fileID: 1119675932}
-  forceController: {fileID: 1124406058}
-  gripperInterface: {fileID: 1279036587}
 --- !u!4 &757340085
 Transform:
   m_ObjectHideFlags: 0
@@ -5072,8 +5066,6 @@ GameObject:
   - component: {fileID: 853727498}
   - component: {fileID: 853727497}
   - component: {fileID: 853727500}
-  - component: {fileID: 853727499}
-  - component: {fileID: 853727496}
   - component: {fileID: 853727501}
   m_Layer: 0
   m_Name: Publisher
@@ -5082,27 +5074,6 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &853727496
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 853727495}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 06bdeb3f0af49d24994e0dfac36f35f9, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  simpleGripperController: {fileID: 1124406058}
-  target: {fileID: 1119675932}
-  forceTransferRate: 1
-  contactDetectionRadius: 0.5
-  targetLayer:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  showForceGizmos: 1
-  enableForceLogging: 1
 --- !u!114 &853727497
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5133,32 +5104,6 @@ Transform:
   m_Father: {fileID: 0}
   m_RootOrder: 5
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &853727499
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 853727495}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 8903788431662d344be528a4ab1f7296, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  baseGripForce: 10
-  forceVariability: 0.1
-  forceChangeRate: 1
-  enableAdaptiveControl: 1
-  adaptiveGain: 0.5
-  dampingFactor: 0.3
-  enableForceNoise: 0
-  noiseStrength: 0.1
-  controlMode: 0
-  presetType: 1
-  applyPreset: 0
-  showDebugInfo: 1
-  recordExperimentData: 1
-  gripperController: {fileID: 0}
 --- !u!114 &853727500
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5513,9 +5458,9 @@ ArticulationBody:
   m_Enabled: 1
   m_Mass: 1
   m_ParentAnchorPosition: {x: -4.3192113e-11, y: -0.00000044703484, z: 4.3028695e-11}
-  m_ParentAnchorRotation: {x: 0.7071072, y: -0.7071073, z: 0.00020957521, w: 0.00020949093}
+  m_ParentAnchorRotation: {x: 0.7071071, y: -0.70710725, z: 0.0002095752, w: 0.00020949091}
   m_AnchorPosition: {x: 0, y: 0, z: 0}
-  m_AnchorRotation: {x: 0, y: 0, z: 0.7071068, w: 0.7071068}
+  m_AnchorRotation: {x: 0, y: 0, z: 0.70710677, w: 0.70710677}
   m_ComputeParentAnchor: 1
   m_ArticulationJointType: 0
   m_LinearX: 2
@@ -6042,22 +5987,17 @@ MonoBehaviour:
   m_GameObject: {fileID: 1119675931}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 55eac04ed9670cc42bba9f8fbfce8d70, type: 3}
+  m_Script: {fileID: 11500000, guid: 70ca57e48d21a61489d05a9fb5dd986d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  softness: 0.8
+  softness: 0.5
   maxDeformation: 0.3
   deformationSpeed: 2
   enableVisualDeformation: 1
   breakingForce: 50
   compressionResistance: 15
-  mass: 1
-  materialType: 1
   originalColor: {r: 1, g: 1, b: 1, a: 1}
-  stressColor: {r: 1, g: 0, b: 0, a: 1}
-  brokenColor: {r: 0.5, g: 0.5, b: 0.5, a: 1}
-  enableDebugLogs: 1
-  showContactGizmos: 1
+  enableDebugLogs: 0
 --- !u!1 &1124406057
 GameObject:
   m_ObjectHideFlags: 0
@@ -6084,23 +6024,13 @@ MonoBehaviour:
   m_GameObject: {fileID: 1124406057}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 8903788431662d344be528a4ab1f7296, type: 3}
+  m_Script: {fileID: 11500000, guid: dffa243396da20e4a8636701ed00878a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  baseGripForce: 20
+  baseGripForce: 10
   forceVariability: 0.1
   forceChangeRate: 1
-  enableAdaptiveControl: 1
-  adaptiveGain: 0.5
-  dampingFactor: 0.3
-  enableForceNoise: 0
-  noiseStrength: 0.1
-  controlMode: 0
-  presetType: 1
-  applyPreset: 0
   showDebugInfo: 1
-  recordExperimentData: 1
-  gripperController: {fileID: 0}
 --- !u!4 &1124406059
 Transform:
   m_ObjectHideFlags: 0
@@ -7387,18 +7317,20 @@ MonoBehaviour:
   m_GameObject: {fileID: 1279036586}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 06bdeb3f0af49d24994e0dfac36f35f9, type: 3}
+  m_Script: {fileID: 11500000, guid: ef77b99be2eed7945a0e6967a415530f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
   simpleGripperController: {fileID: 1124406058}
   target: {fileID: 1119675932}
-  forceTransferRate: 1
-  contactDetectionRadius: 0.15
-  targetLayer:
-    serializedVersion: 2
-    m_Bits: 4294967295
-  showForceGizmos: 1
-  enableForceLogging: 0
+  leftGripperTip: {fileID: 1634691826}
+  rightGripperTip: {fileID: 1950722835}
+  leftGripperBody: {fileID: 695127894}
+  rightGripperBody: {fileID: 940780296}
+  gripperCloseThreshold: 0.005
+  contactForceThreshold: 0.5
+  requireBothGrippersContact: 1
+  showContactGizmos: 1
+  enableDetailedLogging: 1
 --- !u!4 &1279036588
 Transform:
   m_ObjectHideFlags: 0
@@ -8353,9 +8285,9 @@ ArticulationBody:
   m_Enabled: 1
   m_Mass: 1
   m_ParentAnchorPosition: {x: -4.308376e-11, y: -0.00000044703626, z: -0.000000014858159}
-  m_ParentAnchorRotation: {x: -0.00000003161014, y: -0.00000007375699, z: 0.70710737, w: 0.70710725}
+  m_ParentAnchorRotation: {x: -0.000000031610135, y: -0.000000073756986, z: 0.7071073, w: 0.7071072}
   m_AnchorPosition: {x: 0, y: 0, z: 0}
-  m_AnchorRotation: {x: 0, y: 0, z: 0.7071068, w: 0.7071068}
+  m_AnchorRotation: {x: 0, y: 0, z: 0.70710677, w: 0.70710677}
   m_ComputeParentAnchor: 1
   m_ArticulationJointType: 0
   m_LinearX: 2
@@ -8468,9 +8400,9 @@ ArticulationBody:
   m_Enabled: 1
   m_Mass: 1
   m_ParentAnchorPosition: {x: -4.313882e-11, y: -0.0000004470349, z: 4.305712e-11}
-  m_ParentAnchorRotation: {x: 0.00000004214685, y: -0.7071071, z: 0.0000000842937, w: 0.70710725}
+  m_ParentAnchorRotation: {x: -0.000000042146844, y: 0.70710707, z: -0.000000084293696, w: -0.7071072}
   m_AnchorPosition: {x: 0, y: 0, z: 0}
-  m_AnchorRotation: {x: 0, y: -0.7071068, z: 0, w: 0.7071068}
+  m_AnchorRotation: {x: 0, y: 0.70710677, z: 0, w: -0.70710677}
   m_ComputeParentAnchor: 1
   m_ArticulationJointType: 1
   m_LinearX: 1
@@ -8485,7 +8417,7 @@ ArticulationBody:
     stiffness: 0
     damping: 0
     forceLimit: 1
-    target: 0
+    target: 0.02
     targetVelocity: 0
   m_YDrive:
     lowerLimit: 0
@@ -8650,9 +8582,9 @@ ArticulationBody:
   m_Enabled: 1
   m_Mass: 1
   m_ParentAnchorPosition: {x: -0.000000025145717, y: -0.014750004, z: 0.02460045}
-  m_ParentAnchorRotation: {x: 0.000034183264, y: 0.70707333, z: 0.000034064054, w: 0.7071414}
+  m_ParentAnchorRotation: {x: 0.000034183264, y: 0.7070732, z: 0.000034064054, w: 0.7071413}
   m_AnchorPosition: {x: 0, y: 0, z: 0}
-  m_AnchorRotation: {x: 0, y: 0, z: 0.7071068, w: 0.7071068}
+  m_AnchorRotation: {x: 0, y: 0, z: 0.70710677, w: 0.70710677}
   m_ComputeParentAnchor: 1
   m_ArticulationJointType: 0
   m_LinearX: 2
@@ -8868,6 +8800,49 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   geometryType: 3
+--- !u!1 &1721394218
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1721394220}
+  - component: {fileID: 1721394219}
+  m_Layer: 0
+  m_Name: ContactDiagnosis
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1721394219
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1721394218}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7a78cd7ce9e24194da0bfd6411bb4497, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+--- !u!4 &1721394220
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1721394218}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 9.624437, y: -8.787994, z: -20.209517}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_RootOrder: 13
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1728972809
 GameObject:
   m_ObjectHideFlags: 0
@@ -9578,9 +9553,9 @@ ArticulationBody:
   m_Enabled: 1
   m_Mass: 1
   m_ParentAnchorPosition: {x: -4.313882e-11, y: 0.0000004470349, z: 2.2186525e-10}
-  m_ParentAnchorRotation: {x: 0.70710737, y: -0.00020949093, z: -0.70710725, w: 0.00020953307}
+  m_ParentAnchorRotation: {x: -0.7071073, y: 0.00020949091, z: 0.7071072, w: -0.00020953306}
   m_AnchorPosition: {x: 0, y: 0, z: 0}
-  m_AnchorRotation: {x: 0, y: -0.7071068, z: 0, w: 0.7071068}
+  m_AnchorRotation: {x: 0, y: 0.70710677, z: 0, w: -0.70710677}
   m_ComputeParentAnchor: 1
   m_ArticulationJointType: 1
   m_LinearX: 1
@@ -9595,7 +9570,7 @@ ArticulationBody:
     stiffness: 0
     damping: 0
     forceLimit: 1
-    target: 0
+    target: -0.02
     targetVelocity: 0
   m_YDrive:
     lowerLimit: 0
