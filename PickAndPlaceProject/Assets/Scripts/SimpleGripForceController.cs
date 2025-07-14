@@ -374,14 +374,163 @@ public class SimpleGripForceController : MonoBehaviour
         GUILayout.EndArea();
     }
 
-    // SimpleGripForceController.cs に追加するメソッド
+// SimpleGripForceController.cs に追加する必要があるメソッド（完全版）
 
 /// <summary>
-/// 現在の目標力を取得（外部アクセス用）
+/// 現在のターゲット力を取得（外部アクセス用）
 /// </summary>
 public float GetCurrentTargetForce()
 {
     return currentTargetForce;
+}
+
+/// <summary>
+/// 現在の実際の力を取得
+/// </summary>
+public float GetCurrentActualForce()
+{
+    if (gripperController == null) return 0f;
+    
+    // GripperForceControllerがある場合
+    try 
+    {
+        var graspState = gripperController.GetGraspingState();
+        return graspState.currentForce;
+    }
+    catch
+    {
+        // フォールバック：基本的な力を返す
+        return currentTargetForce;
+    }
+}
+
+/// <summary>
+/// 把持状態を取得（GraspingState形式で）
+/// GripperTargetInterfaceとの互換性のため
+/// </summary>
+public GraspingState GetGraspingState()
+{
+    GraspingState state = new GraspingState();
+    
+    state.currentForce = currentTargetForce;
+    state.targetForce = baseGripForce;
+    state.lastUpdateTime = Time.time;
+    
+    // グリッパーコントローラーが利用可能な場合、詳細情報を取得
+    if (gripperController != null)
+    {
+        try 
+        {
+            var gripperState = gripperController.GetGraspingState();
+            state.isGrasping = gripperState.isGrasping;
+            state.isSuccessful = gripperState.isSuccessful;
+            state.leftGripperForce = gripperState.currentForce * 0.5f;  // 仮の分割
+            state.rightGripperForce = gripperState.currentForce * 0.5f;
+            state.hasContact = gripperState.isGrasping;
+        }
+        catch
+        {
+            // GripperForceControllerが利用できない場合のフォールバック
+            state.isGrasping = currentTargetForce > 1f;
+            state.isSuccessful = state.isGrasping;
+            state.hasContact = state.isGrasping;
+            state.leftGripperForce = currentTargetForce * 0.5f;
+            state.rightGripperForce = currentTargetForce * 0.5f;
+        }
+    }
+    else
+    {
+        // GripperForceControllerがない場合の簡易判定
+        state.isGrasping = currentTargetForce > 1f;
+        state.isSuccessful = state.isGrasping && currentTargetForce < 50f;
+        state.hasContact = state.isGrasping;
+        state.leftGripperForce = currentTargetForce * 0.5f;
+        state.rightGripperForce = currentTargetForce * 0.5f;
+    }
+    
+    return state;
+}
+
+/// <summary>
+/// グリッパーが閉じている状態かどうかを判定
+/// </summary>
+public bool IsGripperClosed()
+{
+    if (gripperController == null) 
+    {
+        // フォールバック：力が一定以上なら閉じていると判定
+        return currentTargetForce > 2f;
+    }
+    
+    try 
+    {
+        var graspState = gripperController.GetGraspingState();
+        return graspState.isGrasping;
+    }
+    catch
+    {
+        return currentTargetForce > 2f;
+    }
+}
+
+/// <summary>
+/// 力制御を手動で有効/無効にする
+/// </summary>
+public void SetForceControlEnabled(bool enabled)
+{
+    this.enabled = enabled;
+    
+    if (enableDataRecording)
+    {
+        Debug.Log($"SimpleGripForceController: Force control {(enabled ? "ENABLED" : "DISABLED")}");
+    }
+}
+
+/// <summary>
+/// 外部から基本把持力を設定
+/// </summary>
+public void SetBaseGripForce(float force)
+{
+    baseGripForce = Mathf.Clamp(force, 0.1f, 100f);
+    currentTargetForce = baseGripForce;
+    
+    if (enableDataRecording)
+    {
+        Debug.Log($"Base grip force set to: {baseGripForce:F2}N");
+    }
+}
+
+/// <summary>
+/// 現在の制御モードを取得
+/// </summary>
+public string GetCurrentControlMode()
+{
+    return controlMode.ToString();
+}
+
+/// <summary>
+/// 力制御の統計情報を取得
+/// </summary>
+public void GetForceStatistics(out float avgForce, out float maxForce, out float minForce)
+{
+    if (experimentData.Count == 0)
+    {
+        avgForce = maxForce = minForce = currentTargetForce;
+        return;
+    }
+    
+    float sum = 0f;
+    maxForce = float.MinValue;
+    minForce = float.MaxValue;
+    
+    foreach (var data in experimentData)
+    {
+        sum += data.targetForce;
+        maxForce = Mathf.Max(maxForce, data.targetForce);
+        minForce = Mathf.Min(minForce, data.targetForce);
+    }
+    
+    avgForce = sum / experimentData.Count;
 }
 
 /// <summary>

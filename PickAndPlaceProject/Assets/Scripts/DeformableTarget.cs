@@ -51,11 +51,12 @@ public class DeformableTarget : MonoBehaviour
         Hard,     // 金属・石
         Fragile   // ガラス・卵
     }
-    
+        // ContactInfoにnormalフィールドを追加
     [System.Serializable]
     public struct ContactInfo
     {
         public Vector3 position;
+        public Vector3 normal;      // 追加：接触法線
         public float force;
         public float timestamp;
     }
@@ -147,20 +148,23 @@ public class DeformableTarget : MonoBehaviour
         return mat;
     }
     
+    // DeformableTarget.cs の ApplyGripperForce メソッドを以下に変更
+
     /// <summary>
-    /// グリッパーからの力を受け取る
+    /// グリッパーからの力を受け取る（修正版：方向情報付き）
     /// </summary>
-    public void ApplyGripperForce(float force, Vector3 contactPosition)
+    public void ApplyGripperForce(float force, Vector3 contactPosition, Vector3 contactNormal)
     {
         if (isBroken) return;
         
         appliedForce = force;
         isBeingGrasped = force > 0.1f;
         
-        // 接触情報の記録
+        // 接触情報の記録（方向情報付き）
         var contact = new ContactInfo
         {
             position = contactPosition,
+            normal = contactNormal,
             force = force,
             timestamp = Time.time
         };
@@ -172,12 +176,44 @@ public class DeformableTarget : MonoBehaviour
             BreakObject();
         }
         
-        // 変形の計算
-        CalculateDeformation(force);
+        // 方向を考慮した変形の計算
+        CalculateDirectionalDeformation(force, contactNormal);
         
         if (enableDebugLogs)
-            Debug.Log($"Force applied: {force:F2}N, Deformation: {currentDeformation:F3}");
+            Debug.Log($"Directional force applied: {force:F2}N at {contactPosition}, Normal: {contactNormal}, Deformation: {currentDeformation:F3}");
     }
+
+    /// <summary>
+    /// 方向を考慮した変形計算
+    /// </summary>
+    private void CalculateDirectionalDeformation(float force, Vector3 contactNormal)
+    {
+        // 材質の柔軟性に基づく変形計算
+        float baseDeformation = Mathf.Clamp01(force / compressionResistance) * softness;
+        
+        // 接触法線の方向を考慮した変形係数
+        // Y軸（上下）からの圧縮が最も効果的
+        float directionFactor = Mathf.Abs(Vector3.Dot(contactNormal, Vector3.up));
+        directionFactor = Mathf.Clamp(directionFactor, 0.3f, 1f); // 最小30%の効果は保持
+        
+        float targetDeformation = baseDeformation * directionFactor;
+        targetDeformation = Mathf.Clamp(targetDeformation, 0f, maxDeformation);
+        
+        // 滑らかな変形
+        currentDeformation = Mathf.Lerp(currentDeformation, targetDeformation, 
+                                    deformationSpeed * Time.deltaTime);
+    }
+
+    /// <summary>
+    /// 既存のApplyGripperForceメソッドとの互換性維持
+    /// </summary>
+    public void ApplyGripperForce(float force, Vector3 contactPosition)
+    {
+        // デフォルトの法線ベクトル（上向き）を使用
+        ApplyGripperForce(force, contactPosition, Vector3.up);
+    }
+
+
     
     private void CalculateDeformation(float force)
     {
@@ -355,6 +391,196 @@ public class DeformableTarget : MonoBehaviour
     
     // イベント
     public System.Action OnObjectBroken;
+
+    // DeformableTarget.cs に追加する必要があるメソッドと構造体
+
+/// <summary>
+/// オブジェクトの現在状態を表す構造体
+/// </summary>
+[System.Serializable]
+public struct ObjectState
+{
+    [Header("変形情報")]
+    public float deformation;           // 現在の変形量
+    public float maxDeformation;        // 最大変形量
+    public Vector3 originalScale;       // 元のスケール
+    public Vector3 currentScale;        // 現在のスケール
+    
+    [Header("力の情報")]
+    public float appliedForce;          // 適用されている力
+    public float lastAppliedForce;      // 最後に適用された力
+    public int contactCount;            // 接触点の数
+    
+    [Header("材質情報")]
+    public MaterialType materialType;   // 材質タイプ
+    public float softness;              // 柔らかさ
+    public float compressionResistance; // 圧縮抵抗
+    public float breakingForce;         // 破損力
+    
+    [Header("状態情報")]
+    public bool isBroken;               // 破損状態
+    public bool isBeingGrasped;         // 把持されている状態
+    public bool isDeforming;            // 変形中かどうか
+    
+    [Header("タイミング")]
+    public float lastContactTime;       // 最後の接触時刻
+    public float totalGraspTime;        // 総把持時間
+    
+    /// <summary>
+    /// 健全性スコアを計算（0-1）
+    /// </summary>
+    public float GetHealthScore()
+    {
+        if (isBroken) return 0f;
+        
+        float healthScore = 1f - (deformation / maxDeformation);
+        return Mathf.Clamp01(healthScore);
+    }
+    
+    /// <summary>
+    /// 変形率を取得（0-1）
+    /// </summary>
+    public float GetDeformationRatio()
+    {
+        return Mathf.Clamp01(deformation / maxDeformation);
+    }
+}
+
+/// <summary>
+/// 現在のオブジェクト状態を取得
+/// </summary>
+public ObjectState GetCurrentState()
+{
+    ObjectState state = new ObjectState();
+    
+    // 変形情報
+    state.deformation = currentDeformation;
+    state.maxDeformation = maxDeformation;
+    state.originalScale = originalScale;
+    state.currentScale = transform.localScale;
+    
+    // 力の情報
+    state.appliedForce = appliedForce;
+    state.contactCount = contactPoints.Count;
+    
+    // 材質情報
+    state.materialType = materialType;
+    state.softness = softness;
+    state.compressionResistance = compressionResistance;
+    state.breakingForce = breakingForce;
+    
+    // 状態情報
+    state.isBroken = isBroken;
+    state.isBeingGrasped = isBeingGrasped;
+    state.isDeforming = Mathf.Abs(currentDeformation) > 0.001f;
+    
+    // タイミング情報
+    if (contactPoints.Count > 0)
+    {
+        state.lastContactTime = contactPoints[contactPoints.Count - 1].timestamp;
+    }
+    
+    return state;
+}
+
+/// <summary>
+/// オブジェクトの状態をリセット
+/// </summary>
+public void ResetObject()
+{
+    currentDeformation = 0f;
+    appliedForce = 0f;
+    isBeingGrasped = false;
+    isBroken = false;
+    
+    // スケールを元に戻す
+    transform.localScale = originalScale;
+    
+    // 色を元に戻す
+    if (objectRenderer != null && objectRenderer.material != null)
+    {
+        objectRenderer.material.color = originalColor;
+    }
+    
+    // 接触点をクリア
+    contactPoints.Clear();
+    
+    if (enableDebugLogs)
+    {
+        Debug.Log("DeformableTarget reset to original state");
+    }
+}
+
+/// <summary>
+/// 状態の詳細情報を文字列で取得
+/// </summary>
+public string GetStateInfo()
+{
+    var state = GetCurrentState();
+    return $"Deformation: {state.deformation:F3}, Force: {state.appliedForce:F1}N, " +
+           $"Health: {state.GetHealthScore():F2}, Material: {state.materialType}, " +
+           $"Broken: {state.isBroken}, Grasped: {state.isBeingGrasped}";
+}
+
+/// <summary>
+/// 変形の進行度を取得（アニメーション用）
+/// </summary>
+public float GetDeformationProgress()
+{
+    return Mathf.Clamp01(currentDeformation / maxDeformation);
+}
+
+/// <summary>
+/// 材質プリセットを動的に変更
+/// </summary>
+public void ChangeMaterialType(MaterialType newMaterialType)
+{
+    materialType = newMaterialType;
+    ApplyMaterialPreset(newMaterialType);
+    
+    if (enableDebugLogs)
+    {
+        Debug.Log($"Material type changed to: {newMaterialType}");
+    }
+}
+
+/// <summary>
+/// 破損状態を強制的に設定
+/// </summary>
+public void SetBrokenState(bool broken)
+{
+    isBroken = broken;
+    
+    if (broken)
+    {
+        BreakObject();
+    }
+    else
+    {
+        // 破損状態から復旧
+        if (objectRenderer != null && objectRenderer.material != null)
+        {
+            objectRenderer.material.color = originalColor;
+        }
+    }
+}
+
+/// <summary>
+/// 接触点の詳細情報を取得
+/// </summary>
+public ContactInfo[] GetContactPoints()
+{
+    return contactPoints.ToArray();
+}
+
+/// <summary>
+/// 最新の接触情報を取得
+/// </summary>
+public ContactInfo? GetLatestContact()
+{
+    if (contactPoints.Count == 0) return null;
+    return contactPoints[contactPoints.Count - 1];
+}
     
     [System.Serializable]
     public struct ObjectState
