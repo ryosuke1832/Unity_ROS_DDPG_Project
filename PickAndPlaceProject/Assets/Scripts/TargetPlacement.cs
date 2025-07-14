@@ -51,6 +51,8 @@ namespace Unity.Robotics.PickAndPlace
         // Start is called before the first frame update
         void Start()
         {
+
+            
             // Check for mis-configurations and disable if something has changed without this script being updated
             // These are warnings because this script does not contain critical functionality
             if (m_Target == null)
