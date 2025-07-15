@@ -26,10 +26,13 @@ public class GripperTargetInterface : MonoBehaviour
     private bool rightGripperInContact = false;
     private Vector3 leftContactPoint;
     private Vector3 rightContactPoint;
+    private Vector3 leftContactNormal = Vector3.up;
+    private Vector3 rightContactNormal = Vector3.up;
     private Vector3 lastContactNormal = Vector3.up;
     private bool isGripperClosed = false;
     private float currentLeftPosition = 0f;
     private float currentRightPosition = 0f;
+    private bool hasLoggedForceTransfer = false;
     
     void Start()
     {
@@ -51,7 +54,7 @@ public class GripperTargetInterface : MonoBehaviour
     
     void FixedUpdate()
     {
-        UpdateGripperState();
+        // UpdateGripperState();
         TransferForceToTarget();
     }
     
@@ -82,90 +85,73 @@ public class GripperTargetInterface : MonoBehaviour
     {
         if (leftGripperTip != null)
         {
-            AddTriggerToGripper(leftGripperTip.gameObject, true);
+            SetupSingleGripperCollider(leftGripperTip.gameObject, true);
         }
         
         if (rightGripperTip != null)
         {
-            AddTriggerToGripper(rightGripperTip.gameObject, false);
+            SetupSingleGripperCollider(rightGripperTip.gameObject, false);
         }
     }
     
-    private void AddTriggerToGripper(GameObject gripperObject, bool isLeft)
+    private void SetupSingleGripperCollider(GameObject gripperObj, bool isLeft)
     {
-        // トリガーコライダーの追加
-        Collider existingCollider = gripperObject.GetComponent<Collider>();
+        // 既存のコライダーをチェック
+        Collider existingCollider = gripperObj.GetComponent<Collider>();
         if (existingCollider == null)
         {
-            BoxCollider triggerCollider = gripperObject.AddComponent<BoxCollider>();
+            // 小さなトリガーコライダーを追加
+            SphereCollider triggerCollider = gripperObj.AddComponent<SphereCollider>();
             triggerCollider.isTrigger = true;
-            triggerCollider.size = Vector3.one * 0.15f;
-            
-            if (enableDetailedLogging)
-                Debug.Log($"Added trigger to {(isLeft ? "left" : "right")} gripper");
+            triggerCollider.radius = 0.02f;
+        }
+        else
+        {
+            existingCollider.isTrigger = true;
         }
         
-        // 接触検出コンポーネントの追加
-        SimpleContactDetector detector = gripperObject.GetComponent<SimpleContactDetector>();
+        // 接触検出コンポーネントを追加
+        SimpleContactDetector detector = gripperObj.GetComponent<SimpleContactDetector>();
         if (detector == null)
         {
-            detector = gripperObject.AddComponent<SimpleContactDetector>();
-            detector.Initialize(this, isLeft);
+            detector = gripperObj.AddComponent<SimpleContactDetector>();
         }
+        detector.Initialize(this, isLeft);
     }
     
     private void UpdateGripperState()
     {
         // グリッパーの位置を取得
-        if (leftGripperBody != null && leftGripperBody.jointPosition.dofCount > 0)
+        if (leftGripperBody != null)
         {
             currentLeftPosition = leftGripperBody.jointPosition[0];
         }
         
-        if (rightGripperBody != null && rightGripperBody.jointPosition.dofCount > 0)
+        if (rightGripperBody != null)
         {
             currentRightPosition = rightGripperBody.jointPosition[0];
         }
         
-        // グリッパーが閉じているかチェック
-        bool wasGripperClosed = isGripperClosed;
-        bool leftClosed = Mathf.Abs(currentLeftPosition) > gripperCloseThreshold;
-        bool rightClosed = Mathf.Abs(currentRightPosition) > gripperCloseThreshold;
-        isGripperClosed = leftClosed || rightClosed; // どちらかが動いていれば閉じているとみなす
-        
-        // 状態変化をログ
-        if (enableDetailedLogging && wasGripperClosed != isGripperClosed)
-        {
-            Debug.Log($"Gripper state changed: {(isGripperClosed ? "CLOSED" : "OPEN")}");
-            Debug.Log($"Positions - Left: {currentLeftPosition:F4}, Right: {currentRightPosition:F4}");
-        }
+        // グリッパーの閉状態を判定
+        isGripperClosed = IsGripperInClosedState();
     }
     
-    private void TransferForceToTarget()
+    private bool IsGripperInClosedState()
     {
-        if (target == null || simpleGripperController == null) return;
+        // URDFファイルによると：
+        // CloseGripper: leftDrive.target = -0.01f, rightDrive.target = 0.01f
+        // つまり：左グリッパーが負の方向、右グリッパーが正の方向で閉じる
         
-        // 力を伝達できる条件をチェック
-        bool canTransferForce = isGripperClosed && HasValidContact();
+        bool leftClosed = currentLeftPosition < -gripperCloseThreshold;
+        bool rightClosed = currentRightPosition > gripperCloseThreshold;
         
-        if (!canTransferForce) return;
-        
-        // 現在の力を取得
-        float currentForce = simpleGripperController.GetCurrentTargetForce();
-        
-        // 閾値以上の場合のみ伝達
-        if (currentForce >= contactForceThreshold)
+        if (enableDetailedLogging)
         {
-            Vector3 contactPoint = CalculateContactPoint();
-            
-            // 方向を考慮した力伝達
-            target.ApplyGripperForceWithDirection(currentForce, contactPoint, lastContactNormal);
-            
-            if (enableDetailedLogging && Time.fixedTime % 0.2f < Time.fixedDeltaTime)
-            {
-                Debug.Log($"Force Transfer: {currentForce:F2}N at {contactPoint}");
-            }
+            Debug.Log($"Gripper positions - Left: {currentLeftPosition:F4} (closed: {leftClosed}), " +
+                     $"Right: {currentRightPosition:F4} (closed: {rightClosed})");
         }
+        
+        return leftClosed && rightClosed;
     }
     
     private bool HasValidContact()
@@ -194,133 +180,107 @@ public class GripperTargetInterface : MonoBehaviour
         {
             return rightContactPoint;
         }
-        
-        return target.transform.position;
+        else
+        {
+            return target != null ? target.transform.position : Vector3.zero;
+        }
     }
-
-    private Vector3 leftContactNormal = Vector3.zero;
-    private Vector3 rightContactNormal = Vector3.zero;
-    private bool hasLoggedForceTransfer = false; // 力伝達ログ制御用
     
-        // OnGripperContactEnter メソッドを修正（ログを削除）
-        public void OnGripperContactEnter(Collider collider, bool isLeftGripper, Vector3 contactPoint, Vector3 contactNormal)
+    private Vector3 CalculateAggregateContactNormal()
+    {
+        Vector3 aggregateNormal = Vector3.zero;
+        int contactCount = 0;
+        
+        if (leftGripperInContact)
         {
-            if (collider.gameObject != target.gameObject) return;
-            
-            if (isLeftGripper)
-            {
-                leftGripperInContact = true;
-                leftContactPoint = contactPoint;
-                leftContactNormal = contactNormal;
-            }
-            else
-            {
-                rightGripperInContact = true;
-                rightContactPoint = contactPoint;
-                rightContactNormal = contactNormal;
-            }
-            
-            // 複合接触法線を計算（ログなし）
-            CalculateAggregateContactNormal();
-            
-            // 簡単な接触ログのみ
-            if (enableDetailedLogging)
-            {
-                Debug.Log($"{(isLeftGripper ? "Left" : "Right")} gripper contact ENTER");
-            }
+            aggregateNormal += leftContactNormal;
+            contactCount++;
         }
         
-        // 複合接触法線計算（ログなし）
-        private void CalculateAggregateContactNormal()
+        if (rightGripperInContact)
         {
-            Vector3 aggregateNormal = Vector3.zero;
-            int contactCount = 0;
-            
-            if (leftGripperInContact)
-            {
-                aggregateNormal += leftContactNormal;
-                contactCount++;
-            }
-            
-            if (rightGripperInContact)
-            {
-                aggregateNormal += rightContactNormal;
-                contactCount++;
-            }
-            
-            if (contactCount > 0)
-            {
-                lastContactNormal = (aggregateNormal / contactCount).normalized;
-            }
+            aggregateNormal += rightContactNormal;
+            contactCount++;
         }
         
-        // OnGripperContactExit（ログ削除）
-        public void OnGripperContactExit(Collider collider, bool isLeftGripper)
+        if (contactCount > 0)
         {
-            if (collider.gameObject != target.gameObject) return;
-            
-            if (isLeftGripper)
-            {
-                leftGripperInContact = false;
-                leftContactNormal = Vector3.zero;
-            }
-            else
-            {
-                rightGripperInContact = false;
-                rightContactNormal = Vector3.zero;
-            }
-            
-            CalculateAggregateContactNormal();
-            
-            if (enableDetailedLogging)
-            {
-                Debug.Log($"{(isLeftGripper ? "Left" : "Right")} gripper contact EXIT");
-            }
+            aggregateNormal /= contactCount;
+            return aggregateNormal.normalized;
         }
         
-        // TransferForceToTarget（力伝達時のみ詳細ログ）
-        private void TransferForceToTarget()
+        return Vector3.up; // デフォルト
+    }
+    
+    private void TransferForceToTarget()
+    {
+        if (target == null || simpleGripperController == null) return;
+        
+        bool canTransferForce = isGripperClosed && HasValidContact();
+        
+        if (!canTransferForce)
         {
-            if (target == null || simpleGripperController == null) return;
+            hasLoggedForceTransfer = false; // リセット
+            return;
+        }
+        
+        float currentForce = simpleGripperController.GetCurrentTargetForce();
+        
+        if (currentForce >= contactForceThreshold)
+        {
+            Vector3 contactPoint = CalculateContactPoint();
+            lastContactNormal = CalculateAggregateContactNormal();
             
-            bool canTransferForce = isGripperClosed && HasValidContact();
-            
-            if (!canTransferForce)
+            // 力伝達開始時に一度だけ詳細ログを出力
+            if (!hasLoggedForceTransfer)
             {
-                hasLoggedForceTransfer = false; // リセット
-                return;
+                Debug.Log($"=== FORCE TRANSFER STARTED ===");
+                Debug.Log($"Using contact normal: {lastContactNormal}");
+                Debug.Log($"Left normal: {leftContactNormal}");
+                Debug.Log($"Right normal: {rightContactNormal}");
+                Debug.Log($"Aggregate X component: {Mathf.Abs(Vector3.Dot(lastContactNormal, Vector3.right)):F3}");
+                Debug.Log($"Aggregate Y component: {Mathf.Abs(Vector3.Dot(lastContactNormal, Vector3.up)):F3}");
+                Debug.Log($"Aggregate Z component: {Mathf.Abs(Vector3.Dot(lastContactNormal, Vector3.forward)):F3}");
+                Debug.Log($"Contact point: {contactPoint}");
+                Debug.Log($"Force: {currentForce:F2}N");
+                hasLoggedForceTransfer = true;
             }
             
-            float currentForce = simpleGripperController.GetCurrentTargetForce();
-            
-            if (currentForce >= contactForceThreshold)
-            {
-                Vector3 contactPoint = CalculateContactPoint();
-                
-                // 力伝達開始時に一度だけ詳細ログを出力
-                if (!hasLoggedForceTransfer)
-                {
-                    Debug.Log($"=== FORCE TRANSFER STARTED ===");
-                    Debug.Log($"Using contact normal: {lastContactNormal}");
-                    Debug.Log($"Left normal: {leftContactNormal}");
-                    Debug.Log($"Right normal: {rightContactNormal}");
-                    Debug.Log($"Aggregate X component: {Mathf.Abs(Vector3.Dot(lastContactNormal, Vector3.right)):F3}");
-                    Debug.Log($"Aggregate Y component: {Mathf.Abs(Vector3.Dot(lastContactNormal, Vector3.up)):F3}");
-                    Debug.Log($"Aggregate Z component: {Mathf.Abs(Vector3.Dot(lastContactNormal, Vector3.forward)):F3}");
-                    Debug.Log($"Contact point: {contactPoint}");
-                    Debug.Log($"Force: {currentForce:F2}N");
-                    hasLoggedForceTransfer = true;
-                }
-                
-                // 方向を考慮した力伝達
-                target.ApplyGripperForceWithDirection(currentForce, contactPoint, lastContactNormal);
-            }
-            else
-            {
-                hasLoggedForceTransfer = false; // 力が閾値以下になったらリセット
-            }
+            // 方向を考慮した力伝達
+            target.ApplyGripperForceWithDirection(currentForce, contactPoint, lastContactNormal);
+        }
+        else
+        {
+            hasLoggedForceTransfer = false; // 力が閾値以下になったらリセット
         }
     }
+    
+    public void OnGripperContactEnter(Collider collider, bool isLeftGripper, Vector3 contactPoint, Vector3 contactNormal)
+    {
+        if (collider.gameObject != target.gameObject) return;
+        
+        if (isLeftGripper)
+        {
+            leftGripperInContact = true;
+            leftContactPoint = contactPoint;
+            leftContactNormal = contactNormal;
+        }
+        else
+        {
+            rightGripperInContact = true;
+            rightContactPoint = contactPoint;
+            rightContactNormal = contactNormal;
+        }
+        
+        if (enableDetailedLogging)
+        {
+            Debug.Log($"{(isLeftGripper ? "Left" : "Right")} gripper contact ENTER");
+            Debug.Log($"Contact point: {contactPoint}");
+            Debug.Log($"Contact normal: {contactNormal}");
+            Debug.Log($"Contact state - Left: {leftGripperInContact}, Right: {rightGripperInContact}");
+        }
+    }
+    
     public void OnGripperContactExit(Collider collider, bool isLeftGripper)
     {
         if (collider.gameObject != target.gameObject) return;
@@ -341,46 +301,7 @@ public class GripperTargetInterface : MonoBehaviour
         }
     }
     
-    void OnDrawGizmos()
-    {
-        if (!showContactGizmos) return;
-        
-        // グリッパーの状態を色で表示
-        if (leftGripperTip != null)
-        {
-            Gizmos.color = leftGripperInContact ? Color.green : Color.red;
-            Gizmos.DrawWireSphere(leftGripperTip.position, 0.01f);
-        }
-        
-        if (rightGripperTip != null)
-        {
-            Gizmos.color = rightGripperInContact ? Color.green : Color.red;
-            Gizmos.DrawWireSphere(rightGripperTip.position, 0.01f);
-        }
-        
-        // 接触点の表示
-        if (leftGripperInContact)
-        {
-            Gizmos.color = Color.cyan;
-            Gizmos.DrawSphere(leftContactPoint, 0.005f);
-        }
-        
-        if (rightGripperInContact)
-        {
-            Gizmos.color = Color.magenta;
-            Gizmos.DrawSphere(rightContactPoint, 0.005f);
-        }
-        
-        // 接触法線の表示
-        if (HasValidContact())
-        {
-            Gizmos.color = Color.yellow;
-            Vector3 contactPoint = CalculateContactPoint();
-            Gizmos.DrawRay(contactPoint, lastContactNormal * 0.05f);
-        }
-    }
-
-/// <summary>
+    /// <summary>
     /// 把持状態の評価
     /// TrajectoryPlannerDeform から呼び出される
     /// </summary>
@@ -389,7 +310,7 @@ public class GripperTargetInterface : MonoBehaviour
         if (target == null || simpleGripperController == null)
             return GraspEvaluation.CreateSimple(GraspResult.Failure);
         
-        // **デバッグ情報を詳細に出力**
+        // デバッグ情報を詳細に出力
         if (enableDetailedLogging)
         {
             Debug.Log($"=== 詳細評価ログ ===");
@@ -411,17 +332,10 @@ public class GripperTargetInterface : MonoBehaviour
         bool hasValidContact = HasValidContact();
         bool isGripping = isGripperClosed && hasValidContact;
         
-        // **詳細デバッグ**
-        if (enableDetailedLogging)
-        {
-            Debug.Log($"Has valid contact: {hasValidContact}");
-            Debug.Log($"Is gripping: {isGripping}");
-        }
-        
-        // 把持結果を判定
+        // 評価ロジック
         GraspResult result = DetermineGraspResult(objectState, graspingState, isGripping);
         
-        // 評価結果を作成
+        // 評価結果を作成（BasicTypes.csのGraspEvaluationクラスを使用）
         GraspEvaluation evaluation = new GraspEvaluation
         {
             result = result,
@@ -430,7 +344,7 @@ public class GripperTargetInterface : MonoBehaviour
             isBroken = objectState.isBroken,
             hasContact = hasValidContact,
             isGripping = isGripping,
-            confidence = CalculateConfidence(hasValidContact, isGripping, objectState),
+            confidence = CalculateConfidence(objectState, graspingState, hasValidContact, isGripping),
             evaluationTime = Time.time
         };
         
@@ -443,9 +357,6 @@ public class GripperTargetInterface : MonoBehaviour
         return evaluation;
     }
     
-    /// <summary>
-    /// 把持結果を判定
-    /// </summary>
     private GraspResult DetermineGraspResult(ObjectState objectState, GraspingState graspingState, bool isGripping)
     {
         // 破損チェック
@@ -470,7 +381,7 @@ public class GripperTargetInterface : MonoBehaviour
     /// <summary>
     /// 信頼度を計算
     /// </summary>
-    private float CalculateConfidence(bool hasValidContact, bool isGripping, ObjectState objectState)
+    private float CalculateConfidence(ObjectState objectState, GraspingState graspingState, bool hasValidContact, bool isGripping)
     {
         float confidence = 0f;
         
@@ -488,33 +399,48 @@ public class GripperTargetInterface : MonoBehaviour
         
         return Mathf.Clamp01(confidence);
     }
-
-    // GripperTargetInterface.cs の IsGripperInClosedState メソッドを以下に変更
-
-/// <summary>
-/// グリッパーが閉じた状態かどうかを判定（URDF準拠）
-/// </summary>
-private bool IsGripperInClosedState()
-{
-    // URDFファイルによると：
-    // CloseGripper: leftDrive.target = -0.01f, rightDrive.target = 0.01f
-    // つまり：左グリッパーが負の方向、右グリッパーが正の方向で閉じる
     
-    bool leftClosed = currentLeftPosition < -gripperCloseThreshold;
-    bool rightClosed = currentRightPosition > gripperCloseThreshold;
-    
-    if (enableDetailedLogging)
+    void OnDrawGizmos()
     {
-        Debug.Log($"Gripper positions - Left: {currentLeftPosition:F4} (closed: {leftClosed}), " +
-                 $"Right: {currentRightPosition:F4} (closed: {rightClosed})");
+        if (!showContactGizmos) return;
+        
+        // グリッパーの状態を色で表示
+        if (leftGripperTip != null)
+        {
+            Gizmos.color = leftGripperInContact ? Color.green : Color.red;
+            Gizmos.DrawWireSphere(leftGripperTip.position, 0.01f);
+        }
+        
+        if (rightGripperTip != null)
+        {
+            Gizmos.color = rightGripperInContact ? Color.green : Color.red;
+            Gizmos.DrawWireSphere(rightGripperTip.position, 0.01f);
+        }
+        
+        // 接触点を表示
+        if (leftGripperInContact)
+        {
+            Gizmos.color = Color.yellow;
+            Gizmos.DrawSphere(leftContactPoint, 0.005f);
+        }
+        
+        if (rightGripperInContact)
+        {
+            Gizmos.color = Color.yellow;
+            Gizmos.DrawSphere(rightContactPoint, 0.005f);
+        }
+        
+        // 接触法線の表示
+        if (HasValidContact())
+        {
+            Gizmos.color = Color.yellow;
+            Vector3 contactPoint = CalculateContactPoint();
+            Gizmos.DrawRay(contactPoint, lastContactNormal * 0.05f);
+        }
     }
-    
-    return leftClosed && rightClosed;
 }
 
-
-
-// SimpleContactDetector も修正（デバッグログを削除）
+// SimpleContactDetector クラス
 public class SimpleContactDetector : MonoBehaviour
 {
     private GripperTargetInterface parentInterface;

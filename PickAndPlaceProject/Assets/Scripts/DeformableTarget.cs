@@ -1,5 +1,3 @@
-// DeformableTarget.cs の修正版
-
 using UnityEngine;
 using System.Collections.Generic;
 
@@ -79,7 +77,6 @@ public class DeformableTarget : MonoBehaviour
             Debug.Log($"Force applied: {force:F2}N, Deformation: {currentDeformation:F3}");
     }
             
-    // DeformableTarget.cs も修正（力伝達時の最初の1回のみログ）
     public void ApplyGripperForceWithDirection(float force, Vector3 contactPosition, Vector3 contactNormal)
     {
         if (isBroken) return;
@@ -93,80 +90,21 @@ public class DeformableTarget : MonoBehaviour
             Debug.Log($"Object broken! Force: {force:F2}N");
         }
         
-        // 接触方向の成分を分析（ログは削除）
-        float xComponent = Mathf.Abs(Vector3.Dot(contactNormal, Vector3.right));
-        float yComponent = Mathf.Abs(Vector3.Dot(contactNormal, Vector3.up));
-        float zComponent = Mathf.Abs(Vector3.Dot(contactNormal, Vector3.forward));
-        
-        // 力伝達検出時に一度だけログ出力
-        static bool hasLoggedDirection = false;
-        if (!hasLoggedDirection)
+        // 接触情報を追加
+        var newContact = new ContactInfo
         {
-            Debug.Log($"=== DEFORMATION DIRECTION ANALYSIS ===");
-            Debug.Log($"Force: {force:F2}N, Normal: {contactNormal}");
-            Debug.Log($"Direction components - X: {xComponent:F3}, Y: {yComponent:F3}, Z: {zComponent:F3}");
-            hasLoggedDirection = true;
-        }
-        
-        // X方向（左右）からの力の場合
-        if (xComponent > 0.2f)
-        {
-            if (!hasLoggedDirection)
-            {
-                Debug.Log("LEFT-RIGHT COMPRESSION DETECTED!");
-            }
-            
-            // X軸を圧縮、Y・Z軸を拡張する変形を直接適用
-            float deformAmount = Mathf.Clamp01(force / compressionResistance) * softness * 0.5f;
-            Vector3 newScale = new Vector3(
-                originalScale.x * (1f - deformAmount), // X軸圧縮
-                originalScale.y * (1f + deformAmount * 0.3f), // Y軸拡張
-                originalScale.z * (1f + deformAmount * 0.3f)  // Z軸拡張
-            );
-            transform.localScale = newScale;
-            
-            if (!hasLoggedDirection)
-            {
-                Debug.Log($"Applied LEFT-RIGHT compression scale: {newScale}");
-            }
-        }
-        else
-        {
-            // 従来の変形
-            CalculateDirectionalDeformation(force, contactNormal);
-            
-            if (!hasLoggedDirection)
-            {
-                Debug.Log("Using traditional Y-axis compression");
-            }
-        }
-    }
-    
-    private void RecordContact(Vector3 position, Vector3 normal, float force)
-    {
-        // 新しい接触情報を追加
-        ContactInfo contact = new ContactInfo
-        {
-            position = position,
-            normal = normal,
+            position = contactPosition,
+            normal = contactNormal,
             force = force,
             timestamp = Time.time
         };
+        activeContacts.Add(newContact);
         
-        activeContacts.Add(contact);
-        lastContactNormal = normal;
+        lastContactNormal = contactNormal;
+        CalculateDirectionalDeformation(force, contactNormal);
         
-        // 古い接触情報を制限（最新10個まで）
-        if (activeContacts.Count > 10)
-        {
-            activeContacts.RemoveAt(0);
-        }
-    }
-    
-    private void CleanupOldContacts()
-    {
-        // 1秒以上古い接触情報を削除
-        activeContacts.RemoveAll(contact => Time.time - contact.timestamp > 1f);
+        if (enableDebugLogs)
+            Debug.Log($"Directional force applied: {force:F2}N, Normal: {contactNormal}");
     }
     
     private void CalculateDeformation(float force)
@@ -217,48 +155,22 @@ public class DeformableTarget : MonoBehaviour
         }
         
         // 接触方向に基づいた適応的変形
-        Vector3 deformedScale = CalculateAdaptiveScale();
+        Vector3 deformedScale = CalculateDirectionalScale();
         transform.localScale = Vector3.Lerp(transform.localScale, deformedScale, Time.deltaTime * deformationSpeed);
     }
-       
-
-    private Vector3 CalculateAdaptiveScale()
+    
+    private Vector3 CalculateDirectionalScale()
     {
-        if (activeContacts.Count == 0)
-        {
+        if (lastContactNormal == Vector3.zero)
             return CalculateDefaultDeformation();
-        }
-        
-        // 複数の接触点から主要な変形方向を決定
-        Vector3 avgContactNormal = Vector3.zero;
-        float totalForce = 0f;
-        
-        foreach (var contact in activeContacts)
-        {
-            avgContactNormal += contact.normal * contact.force;
-            totalForce += contact.force;
-        }
-        
-        if (totalForce > 0)
-        {
-            avgContactNormal = (avgContactNormal / totalForce).normalized;
-        }
-        
-        // 接触方向の成分を分析
-        float xComponent = Mathf.Abs(Vector3.Dot(avgContactNormal, Vector3.right));
-        float yComponent = Mathf.Abs(Vector3.Dot(avgContactNormal, Vector3.up));
-        float zComponent = Mathf.Abs(Vector3.Dot(avgContactNormal, Vector3.forward));
-        
-        Vector3 deformedScale = originalScale;
+            
         float deformationAmount = currentDeformation;
+        Vector3 deformedScale = originalScale;
         
-        // デバッグ情報
-        if (enableDebugLogs)
-        {
-            Debug.Log($"Contact Analysis - Normal: {avgContactNormal}, " +
-                    $"Components: X={xComponent:F2}, Y={yComponent:F2}, Z={zComponent:F2}, " +
-                    $"Contacts: {activeContacts.Count}");
-        }
+        // 接触法線の成分を分析
+        float xComponent = Mathf.Abs(Vector3.Dot(lastContactNormal, Vector3.right));
+        float yComponent = Mathf.Abs(Vector3.Dot(lastContactNormal, Vector3.up));
+        float zComponent = Mathf.Abs(Vector3.Dot(lastContactNormal, Vector3.forward));
         
         // 左右からの把持（X軸方向の圧力）
         if (xComponent > 0.5f)
@@ -351,34 +263,38 @@ public class DeformableTarget : MonoBehaviour
         }
     }
     
-
-        public ObjectState GetCurrentState()
-        {
-            return new ObjectState
-            {
-                deformation = currentDeformation,
-                appliedForce = appliedForce,
-                isBroken = isBroken,
-                isBeingGrasped = isBeingGrasped,
-                materialType = 1, // Medium - BasicTypes.cs の int materialType に合わせる
-                softness = softness
-            };
-        }
-        
-        public void ResetObject()
-        {
-            isBroken = false;
-            currentDeformation = 0f;
-            appliedForce = 0f;
-            isBeingGrasped = false;
-            activeContacts.Clear();
-            lastContactNormal = Vector3.zero;
-            transform.localScale = originalScale;
-            
-            if (objectRenderer != null)
-                objectRenderer.material.color = originalColor;
-            
-            Debug.Log("Object reset");
-        }
-        
+    private void CleanupOldContacts()
+    {
+        // 古い接触情報を削除（0.5秒以上前のもの）
+        activeContacts.RemoveAll(contact => Time.time - contact.timestamp > 0.5f);
     }
+
+    public ObjectState GetCurrentState()
+    {
+        return new ObjectState
+        {
+            deformation = currentDeformation,
+            appliedForce = appliedForce,
+            isBroken = isBroken,
+            isBeingGrasped = isBeingGrasped,
+            materialType = 1, // Medium - BasicTypes.cs の int materialType に合わせる
+            softness = softness
+        };
+    }
+    
+    public void ResetObject()
+    {
+        isBroken = false;
+        currentDeformation = 0f;
+        appliedForce = 0f;
+        isBeingGrasped = false;
+        activeContacts.Clear();
+        lastContactNormal = Vector3.zero;
+        transform.localScale = originalScale;
+        
+        if (objectRenderer != null)
+            objectRenderer.material.color = originalColor;
+        
+        Debug.Log("Object reset");
+    }
+}
