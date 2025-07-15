@@ -297,4 +297,6 @@ public class DeformableTarget : MonoBehaviour
         
         Debug.Log("Object reset");
     }
+
+    
 }

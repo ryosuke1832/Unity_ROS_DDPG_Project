@@ -13,8 +13,8 @@ public class GripperTargetInterface : MonoBehaviour
     public ArticulationBody rightGripperBody;
     
     [Header("接触判定設定")]
-    public float gripperCloseThreshold = 0.001f;
-    public float contactForceThreshold = 0.5f;
+    public float gripperCloseThreshold = 0.01f;
+    public float contactForceThreshold = 0.1f;
     public bool requireBothGrippersContact = true;
     
     [Header("デバッグ")]
@@ -54,7 +54,7 @@ public class GripperTargetInterface : MonoBehaviour
     
     void FixedUpdate()
     {
-        // UpdateGripperState();
+        UpdateGripperState();
         TransferForceToTarget();
     }
     
@@ -119,22 +119,95 @@ public class GripperTargetInterface : MonoBehaviour
         detector.Initialize(this, isLeft);
     }
     
-    private void UpdateGripperState()
+
+// GripperTargetInterface.cs の UpdateGripperState() メソッドに追加するデバッグコード
+
+private void UpdateGripperState()
+{
+    // === 詳細デバッグ情報を追加 ===
+    if (leftGripperBody != null && rightGripperBody != null)
     {
-        // グリッパーの位置を取得
-        if (leftGripperBody != null)
-        {
-            currentLeftPosition = leftGripperBody.jointPosition[0];
-        }
+        // グリッパーの実際の位置を取得
+        currentLeftPosition = leftGripperBody.xDrive.target;
+        currentRightPosition = rightGripperBody.xDrive.target;
         
-        if (rightGripperBody != null)
-        {
-            currentRightPosition = rightGripperBody.jointPosition[0];
-        }
+        // 実際のjoint位置も取得
+        float leftJointPosition = leftGripperBody.jointPosition[0];
+        float rightJointPosition = rightGripperBody.jointPosition[0];
         
-        // グリッパーの閉状態を判定
-        isGripperClosed = IsGripperInClosedState();
+        // デバッグ: グリッパーの詳細状態
+        Debug.Log($"=== グリッパー状態詳細 ===");
+        Debug.Log($"Left - Target: {currentLeftPosition:F4}, Actual: {leftJointPosition:F4}");
+        Debug.Log($"Right - Target: {currentRightPosition:F4}, Actual: {rightJointPosition:F4}");
+        Debug.Log($"Left Threshold: {-gripperCloseThreshold:F4}");
+        Debug.Log($"Right Threshold: {gripperCloseThreshold:F4}");
+        
+        // 閾値との比較
+        bool leftClosed = currentLeftPosition <= -gripperCloseThreshold;
+        bool rightClosed = currentRightPosition >= gripperCloseThreshold;
+        
+        Debug.Log($"Left Closed Check: {leftClosed} ({currentLeftPosition:F4} <= {-gripperCloseThreshold:F4})");
+        Debug.Log($"Right Closed Check: {rightClosed} ({currentRightPosition:F4} >= {gripperCloseThreshold:F4})");
+        
+        isGripperClosed = leftClosed && rightClosed;
+        Debug.Log($"Overall Gripper Closed: {isGripperClosed}");
     }
+    
+    // コライダーベースの接触検出をデバッグ
+    CheckColliderContact();
+}
+
+// 新しいメソッド: コライダーベースの接触検出
+private void CheckColliderContact()
+{
+    if (target == null) return;
+    
+    // ターゲットのコライダーを取得
+    Collider targetCollider = target.GetComponent<Collider>();
+    if (targetCollider == null)
+    {
+        Debug.LogWarning("ターゲットにColliderが見つかりません");
+        return;
+    }
+    
+    // グリッパーとターゲット間の距離を計算
+    if (leftGripperTip != null)
+    {
+        float leftDistance = Vector3.Distance(leftGripperTip.position, target.transform.position);
+        Debug.Log($"Left Gripper Distance to Target: {leftDistance:F4}");
+        
+        // Raycastによる接触検出
+        Vector3 directionToTarget = (target.transform.position - leftGripperTip.position).normalized;
+        if (Physics.Raycast(leftGripperTip.position, directionToTarget, out RaycastHit hit, 0.1f))
+        {
+            if (hit.collider == targetCollider)
+            {
+                Debug.Log($"Left Gripper Raycast Hit: {hit.distance:F4}");
+                leftGripperInContact = true;
+                leftContactPoint = hit.point;
+                leftContactNormal = hit.normal;
+            }
+        }
+    }
+    
+    if (rightGripperTip != null)
+    {
+        float rightDistance = Vector3.Distance(rightGripperTip.position, target.transform.position);
+        Debug.Log($"Right Gripper Distance to Target: {rightDistance:F4}");
+        
+        Vector3 directionToTarget = (target.transform.position - rightGripperTip.position).normalized;
+        if (Physics.Raycast(rightGripperTip.position, directionToTarget, out RaycastHit hit, 0.1f))
+        {
+            if (hit.collider == targetCollider)
+            {
+                Debug.Log($"Right Gripper Raycast Hit: {hit.distance:F4}");
+                rightGripperInContact = true;
+                rightContactPoint = hit.point;
+                rightContactNormal = hit.normal;
+            }
+        }
+    }
+}
     
     private bool IsGripperInClosedState()
     {
