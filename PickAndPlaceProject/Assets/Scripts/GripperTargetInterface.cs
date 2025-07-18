@@ -132,24 +132,24 @@ public class GripperTargetInterface : MonoBehaviour
             float rightJointPosition = rightGripperBody.jointPosition[0];
             
             // デバッグ: グリッパーの詳細状態
-            Debug.Log($"=== グリッパー状態詳細 ===");
-            Debug.Log($"Left - Target: {currentLeftPosition:F4}, Actual: {leftJointPosition:F4}");
-            Debug.Log($"Right - Target: {currentRightPosition:F4}, Actual: {rightJointPosition:F4}");
-            Debug.Log($"Left Threshold: {gripperCloseThreshold:F4}");
-            Debug.Log($"Right Threshold: {-gripperCloseThreshold:F4}");
+            // Debug.Log($"=== グリッパー状態詳細 ===");
+            // Debug.Log($"Left - Target: {currentLeftPosition:F4}, Actual: {leftJointPosition:F4}");
+            // Debug.Log($"Right - Target: {currentRightPosition:F4}, Actual: {rightJointPosition:F4}");
+            // Debug.Log($"Left Threshold: {gripperCloseThreshold:F4}");
+            // Debug.Log($"Right Threshold: {-gripperCloseThreshold:F4}");
             
             bool leftClosed = currentLeftPosition <= -gripperCloseThreshold;  // -0.01 <= -0.001 = True
             bool rightClosed = currentRightPosition >= gripperCloseThreshold; // +0.01 >= +0.001 = True
             
-            Debug.Log($"Left Closed Check: {leftClosed} ({currentLeftPosition:F4} >= {gripperCloseThreshold:F4})");
-            Debug.Log($"Right Closed Check: {rightClosed} ({currentRightPosition:F4} <= {-gripperCloseThreshold:F4})");
+            // Debug.Log($"Left Closed Check: {leftClosed} ({currentLeftPosition:F4} >= {gripperCloseThreshold:F4})");
+            // Debug.Log($"Right Closed Check: {rightClosed} ({currentRightPosition:F4} <= {-gripperCloseThreshold:F4})");
             
             isGripperClosed = leftClosed && rightClosed;
-            Debug.Log($"Overall Gripper Closed: {isGripperClosed}");
+            // Debug.Log($"Overall Gripper Closed: {isGripperClosed}");
         }
         
         // 改良された接触検出
-        CheckColliderContactImproved();
+        // CheckColliderContactImproved();
     }
 
 
@@ -202,9 +202,9 @@ public class GripperTargetInterface : MonoBehaviour
             CalculateGripperForceDirection();
         }
         
-        Debug.Log($"Contact Status - Left: {leftGripperInContact}, Right: {rightGripperInContact}");
-        Debug.Log($"Valid Contact: {HasValidContact()}");
-        Debug.Log($"Can Transfer Force: {isGripperClosed && HasValidContact()}");
+        // Debug.Log($"Contact Status - Left: {leftGripperInContact}, Right: {rightGripperInContact}");
+        // Debug.Log($"Valid Contact: {HasValidContact()}");
+        // Debug.Log($"Can Transfer Force: {isGripperClosed && HasValidContact()}");
     }
 
     // *** 新しいメソッド: グリッパー間の幾何学的関係から力方向を計算 ***
@@ -216,12 +216,12 @@ public class GripperTargetInterface : MonoBehaviour
         Vector3 gripperVector = rightGripperTip.position - leftGripperTip.position;
         Vector3 gripperDirection = gripperVector.normalized;
         
-        Debug.Log($"=== グリッパー幾何学計算 ===");
-        Debug.Log($"Left Gripper Position: {leftGripperTip.position}");
-        Debug.Log($"Right Gripper Position: {rightGripperTip.position}");
-        Debug.Log($"Gripper Vector: {gripperVector}");
-        Debug.Log($"Gripper Direction: {gripperDirection}");
-        Debug.Log($"Gripper Distance: {gripperVector.magnitude:F4}");
+        // Debug.Log($"=== グリッパー幾何学計算 ===");
+        // Debug.Log($"Left Gripper Position: {leftGripperTip.position}");
+        // Debug.Log($"Right Gripper Position: {rightGripperTip.position}");
+        // Debug.Log($"Gripper Vector: {gripperVector}");
+        // Debug.Log($"Gripper Direction: {gripperDirection}");
+        // Debug.Log($"Gripper Distance: {gripperVector.magnitude:F4}");
         
         // 左右のグリッパーから中心への力方向を設定
         // 左グリッパー → 右方向への力
@@ -230,28 +230,28 @@ public class GripperTargetInterface : MonoBehaviour
         // 右グリッパー → 左方向への力  
         rightContactNormal = -gripperDirection; // 右から左方向
         
-        Debug.Log($"Left Contact Normal (L→R): {leftContactNormal}");
-        Debug.Log($"Left Normal Components - X: {leftContactNormal.x:F3}, Y: {leftContactNormal.y:F3}, Z: {leftContactNormal.z:F3}");
+        // Debug.Log($"Left Contact Normal (L→R): {leftContactNormal}");
+        // Debug.Log($"Left Normal Components - X: {leftContactNormal.x:F3}, Y: {leftContactNormal.y:F3}, Z: {leftContactNormal.z:F3}");
         
-        Debug.Log($"Right Contact Normal (R→L): {rightContactNormal}");
-        Debug.Log($"Right Normal Components - X: {rightContactNormal.x:F3}, Y: {rightContactNormal.y:F3}, Z: {rightContactNormal.z:F3}");
+        // Debug.Log($"Right Contact Normal (R→L): {rightContactNormal}");
+        // Debug.Log($"Right Normal Components - X: {rightContactNormal.x:F3}, Y: {rightContactNormal.y:F3}, Z: {rightContactNormal.z:F3}");
         
         // グリッパー間ベクトルの成分分析
         float xComponent = Mathf.Abs(gripperDirection.x);
         float yComponent = Mathf.Abs(gripperDirection.y);
         float zComponent = Mathf.Abs(gripperDirection.z);
         
-        Debug.Log($"グリッパー方向成分 - X: {xComponent:F3}, Y: {yComponent:F3}, Z: {zComponent:F3}");
+        // Debug.Log($"グリッパー方向成分 - X: {xComponent:F3}, Y: {yComponent:F3}, Z: {zComponent:F3}");
         
-        string primaryDirection = "";
-        if (xComponent > yComponent && xComponent > zComponent)
-            primaryDirection = "X軸（左右）";
-        else if (yComponent > zComponent)
-            primaryDirection = "Y軸（上下）";
-        else
-            primaryDirection = "Z軸（前後）";
+        // string primaryDirection = "";
+        // if (xComponent > yComponent && xComponent > zComponent)
+        //     primaryDirection = "X軸（左右）";
+        // else if (yComponent > zComponent)
+        //     primaryDirection = "Y軸（上下）";
+        // else
+        //     primaryDirection = "Z軸（前後）";
         
-        Debug.Log($"主要把持方向: {primaryDirection}");
+        // Debug.Log($"主要把持方向: {primaryDirection}");
     }
 
     // *** 修正された統合法線計算 ***
@@ -417,10 +417,10 @@ public class GripperTargetInterface : MonoBehaviour
         bool canTransferForce = isGripperClosed && HasValidContact();
         
         // 詳細な状態デバッグ
-        Debug.Log($"=== 力伝達判定 ===");
-        Debug.Log($"グリッパー閉じ状態: {isGripperClosed}");
-        Debug.Log($"有効な接触: {HasValidContact()}");
-        Debug.Log($"力伝達可能: {canTransferForce}");
+        // Debug.Log($"=== 力伝達判定 ===");
+        // Debug.Log($"グリッパー閉じ状態: {isGripperClosed}");
+        // Debug.Log($"有効な接触: {HasValidContact()}");
+        // Debug.Log($"力伝達可能: {canTransferForce}");
         
         if (!canTransferForce)
         {
@@ -429,7 +429,7 @@ public class GripperTargetInterface : MonoBehaviour
         }
         
         float currentForce = simpleGripperController.GetCurrentTargetForce();
-        Debug.Log($"現在の目標力: {currentForce:F2}N, 閾値: {contactForceThreshold:F2}N");
+        // Debug.Log($"現在の目標力: {currentForce:F2}N, 閾値: {contactForceThreshold:F2}N");
         
         if (currentForce >= contactForceThreshold)
         {
