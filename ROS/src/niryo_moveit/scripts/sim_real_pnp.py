@@ -38,7 +38,8 @@ TOOL_ID = 11
 TOOL_COMMAND_ID = 6
 TRAJECTORY_COMMAND_ID = 7
 
-PICK_PLACE_HEIGHT_OFFSET = 0.065 
+PICK_PLACE_HEIGHT_OFFSET = 0.065
+
 
 # Between Melodic and Noetic, the return type of plan() changed. moveit_commander has no __version__ variable, so checking the python version as a proxy
 if sys.version_info >= (3, 0):
