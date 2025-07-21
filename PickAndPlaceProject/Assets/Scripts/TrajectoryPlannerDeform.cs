@@ -2,15 +2,14 @@ using System.Collections;
 using UnityEngine;
 
 /// <summary>
-/// TrajectoryPlannerに変形システムを統合するコンポーネント
-/// 既存のTrajectoryPlannerと同じGameObjectにアタッチして使用
+/// アルミ缶専用のTrajectoryPlanner拡張
+/// DeformableTargetは使用せず、IntegratedAluminumCanのみに対応
 /// </summary>
 public class TrajectoryPlannerDeform : MonoBehaviour
 {
-    [Header("変形システム連携")]
+    [Header("アルミ缶システム連携")]
     public GripperTargetInterface gripperInterface;
     public IntegratedAluminumCan target;
-
     public SimpleGripForceController forceController;
     
     [Header("把持設定")]
@@ -35,28 +34,28 @@ public class TrajectoryPlannerDeform : MonoBehaviour
             return;
         }
         
-        InitializeDeformationSystem();
+        InitializeAluminumCanSystem();
         
         // グリッパーの動作監視を開始
         StartCoroutine(MonitorGripperMovement());
     }
     
-    private void InitializeDeformationSystem()
+    private void InitializeAluminumCanSystem()
     {
         // 自動的にコンポーネントを検索
         if (gripperInterface == null)
             gripperInterface = GetComponent<GripperTargetInterface>();
             
         if (target == null)
-            target = FindObjectOfType<DeformableTarget>();
+            target = FindObjectOfType<IntegratedAluminumCan>();
             
         if (forceController == null)
             forceController = GetComponent<SimpleGripForceController>();
         
         // 接続状況をログ出力
-        Debug.Log($"変形システム初期化:");
+        Debug.Log($"アルミ缶システム初期化:");
         Debug.Log($"- GripperInterface: {(gripperInterface != null ? "OK" : "NG")}");
-        Debug.Log($"- DeformableTarget: {(target != null ? "OK" : "NG")}");
+        Debug.Log($"- AluminumCan: {(target != null ? "OK" : "NG")}");
         Debug.Log($"- ForceController: {(forceController != null ? "OK" : "NG")}");
         
         // GripperInterfaceの設定
@@ -68,15 +67,15 @@ public class TrajectoryPlannerDeform : MonoBehaviour
     }
     
     /// <summary>
-    /// 変形システム対応の把持開始
+    /// アルミ缶システム対応の把持開始
     /// 外部から呼び出し可能（例：UI、ボタンイベント）
     /// </summary>
-    public void StartGraspWithDeformation()
+    public void StartGraspWithAluminumCan()
     {
         if (enableDeformationLogging)
-            Debug.Log("把持開始 - 変形システム有効");
+            Debug.Log("アルミ缶把持開始 - 力制御システム有効");
         
-        // 変形システムの把持開始
+        // 把持システムの開始
         isCurrentlyGrasping = true;
         
         // 力制御開始
@@ -95,14 +94,14 @@ public class TrajectoryPlannerDeform : MonoBehaviour
     }
     
     /// <summary>
-    /// 変形システム対応の把持終了
+    /// アルミ缶システム対応の把持終了
     /// </summary>
-    public void StopGraspWithDeformation()
+    public void StopGraspWithAluminumCan()
     {
         if (enableDeformationLogging)
-            Debug.Log("把持終了 - 変形システム停止");
+            Debug.Log("アルミ缶把持終了 - 力制御システム停止");
         
-        // 変形システムの停止
+        // 把持システムの停止
         isCurrentlyGrasping = false;
         
         // 力制御停止
@@ -111,10 +110,10 @@ public class TrajectoryPlannerDeform : MonoBehaviour
             forceController.enabled = false;
         }
         
-        // ターゲットの変形リセット
+        // アルミ缶のリセット
         if (target != null)
         {
-            target.ResetObject();
+            target.ResetCan(); // IntegratedAluminumCanのResetCanメソッドを使用
         }
     }
     
@@ -128,11 +127,11 @@ public class TrajectoryPlannerDeform : MonoBehaviour
             
             if (enableDeformationLogging)
             {
-                Debug.Log($"把持評価結果:");
+                Debug.Log($"アルミ缶把持評価結果:");
                 Debug.Log($"- 結果: {evaluation.result}");
                 Debug.Log($"- 適用力: {evaluation.appliedForce:F2}N");
                 Debug.Log($"- 変形度: {evaluation.deformation:F3}");
-                Debug.Log($"- 破損: {evaluation.isBroken}");
+                Debug.Log($"- つぶれ状態: {evaluation.isBroken}");
                 Debug.Log($"- 信頼度: {evaluation.confidence:F2}");
             }
             
@@ -141,13 +140,13 @@ public class TrajectoryPlannerDeform : MonoBehaviour
         }
     }
     
-    // イベント定義（GraspEvaluationクラスはGripperTargetInterface.csで定義されている）
+    // イベント定義
     public System.Action<GraspEvaluation> OnGraspEvaluated;
     
     /// <summary>
-    /// 元のPublishJointsに変形システムを統合したバージョン
+    /// 元のPublishJointsにアルミ缶システムを統合したバージョン
     /// </summary>
-    public void PublishJointsWithDeformation()
+    public void PublishJointsWithAluminumCan()
     {
         if (originalTrajectoryPlanner == null)
         {
@@ -156,10 +155,10 @@ public class TrajectoryPlannerDeform : MonoBehaviour
         }
         
         if (enableDeformationLogging)
-            Debug.Log("変形システム対応のPublishJoints実行");
+            Debug.Log("アルミ缶システム対応のPublishJoints実行");
         
-        // まず変形システムを準備
-        PrepareDeformationSystem();
+        // まずアルミ缶システムを準備
+        PrepareAluminumCanSystem();
         
         // 力制御を有効化（把持動作前に準備）
         if (forceController != null)
@@ -173,9 +172,9 @@ public class TrajectoryPlannerDeform : MonoBehaviour
         originalTrajectoryPlanner.PublishJoints();
     }
     
-    private void PrepareDeformationSystem()
+    private void PrepareAluminumCanSystem()
     {
-        // 変形システムの準備処理
+        // アルミ缶システムの準備処理
         if (forceController != null)
         {
             forceController.enabled = false; // 初期状態では無効
@@ -183,23 +182,23 @@ public class TrajectoryPlannerDeform : MonoBehaviour
         
         if (target != null)
         {
-            target.ResetObject();
+            target.ResetCan(); // アルミ缶をリセット
         }
     }
     
     /// <summary>
     /// 手動での把持テスト用
     /// </summary>
-    [ContextMenu("Test Grip With Deformation")]
-    public void TestGripWithDeformation()
+    [ContextMenu("Test Grip With Aluminum Can")]
+    public void TestGripWithAluminumCan()
     {
         if (isCurrentlyGrasping)
         {
-            StopGraspWithDeformation();
+            StopGraspWithAluminumCan();
         }
         else
         {
-            StartGraspWithDeformation();
+            StartGraspWithAluminumCan();
         }
     }
     
@@ -208,15 +207,15 @@ public class TrajectoryPlannerDeform : MonoBehaviour
     /// </summary>
     public void ShowCurrentStatus()
     {
-        Debug.Log("=== 変形システム状態 ===");
+        Debug.Log("=== アルミ缶システム状態 ===");
         Debug.Log($"把持中: {isCurrentlyGrasping}");
         
         if (target != null)
         {
             var state = target.GetCurrentState();
-            Debug.Log($"ターゲット変形: {state.deformation:F3}");
+            Debug.Log($"アルミ缶変形: {state.deformation:F3}");
             Debug.Log($"適用力: {state.appliedForce:F2}N");
-            Debug.Log($"材質: {state.materialType}");
+            Debug.Log($"つぶれ状態: {state.isBroken}");
         }
         
         if (gripperInterface != null)
@@ -235,12 +234,12 @@ public class TrajectoryPlannerDeform : MonoBehaviour
     /// </summary>
     public void OnGraspPhaseStarted()
     {
-        StartGraspWithDeformation();
+        StartGraspWithAluminumCan();
     }
     
     public void OnGraspPhaseEnded()
     {
-        StopGraspWithDeformation();
+        StopGraspWithAluminumCan();
     }
     
     /// <summary>
@@ -289,15 +288,15 @@ public class TrajectoryPlannerDeform : MonoBehaviour
             {
                 // 把持開始を検出
                 if (enableDeformationLogging)
-                    Debug.Log("グリッパー閉じ動作を検出 - 力制御開始");
-                StartGraspWithDeformation();
+                    Debug.Log("グリッパー閉じ動作を検出 - アルミ缶力制御開始");
+                StartGraspWithAluminumCan();
             }
             else if (!isCurrentlyGrasping && wasGrasping)
             {
                 // 把持終了を検出
                 if (enableDeformationLogging)
-                    Debug.Log("グリッパー開き動作を検出 - 力制御終了");
-                StopGraspWithDeformation();
+                    Debug.Log("グリッパー開き動作を検出 - アルミ缶力制御終了");
+                StopGraspWithAluminumCan();
             }
             
             wasGrasping = isCurrentlyGrasping;

@@ -46,7 +46,7 @@ public class IntegratedAluminumCan : MonoBehaviour
     private Vector3 lastContactNormal = Vector3.up;
     private Rigidbody canRigidbody;
     
-    // IGrippableObject インターフェース用
+    // プロパティ（BasicTypes.csとの互換性用）
     public bool IsBroken => isCrushed;
     public float CurrentDeformation => isCrushed ? 1f : (accumulatedForce / deformationThreshold);
     public MaterialType MaterialType => MaterialType.Metal;
@@ -248,7 +248,7 @@ public class IntegratedAluminumCan : MonoBehaviour
     }
     
     /// <summary>
-    /// 現在の状態を取得（IGrippableObject）
+    /// 現在の状態を取得
     /// </summary>
     public ObjectState GetCurrentState()
     {
@@ -257,9 +257,18 @@ public class IntegratedAluminumCan : MonoBehaviour
             appliedForce = this.appliedForce,
             deformation = CurrentDeformation,
             isBroken = this.isCrushed,
-            softness = this.Softness,
-            materialType = this.MaterialType
+            isBeingGrasped = appliedForce > 0f,
+            materialType = (int)MaterialType.Metal, // 明示的にキャスト
+            softness = this.Softness
         };
+    }
+    
+    /// <summary>
+    /// 蓄積力を取得（デバッグ用）
+    /// </summary>
+    public float GetAccumulatedForce()
+    {
+        return accumulatedForce;
     }
     
     /// <summary>
@@ -342,8 +351,7 @@ public class IntegratedAluminumCan : MonoBehaviour
     }
 }
 
-// 必要なデータ構造
-
+// 既存のBasicTypes.csのObjectStateを使用するため、重複定義を削除
 
 public enum MaterialType
 {
@@ -353,4 +361,3 @@ public enum MaterialType
     Metal,
     Fragile
 }
-
