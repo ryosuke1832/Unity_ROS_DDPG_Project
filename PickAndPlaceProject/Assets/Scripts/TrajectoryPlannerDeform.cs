@@ -9,7 +9,8 @@ public class TrajectoryPlannerDeform : MonoBehaviour
 {
     [Header("変形システム連携")]
     public GripperTargetInterface gripperInterface;
-    public DeformableTarget target;
+    public IntegratedAluminumCan target;
+
     public SimpleGripForceController forceController;
     
     [Header("把持設定")]

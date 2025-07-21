@@ -4,7 +4,7 @@ public class GripperTargetInterface : MonoBehaviour
 {
     [Header("連携コンポーネント")]
     public SimpleGripForceController simpleGripperController;
-    public DeformableTarget target;
+    public IntegratedAluminumCan target;
     
     [Header("グリッパー設定")]
     public Transform leftGripperTip;
