@@ -55,6 +55,7 @@ public class IntegratedAluminumCan : MonoBehaviour
     void Start()
     {
         InitializeComponents();
+        SetupAntiSlipPhysics(); 
         SetupInitialState();
     }
     
@@ -66,6 +67,33 @@ public class IntegratedAluminumCan : MonoBehaviour
         if (showDebugInfo)
         {
             DisplayDebugInfo();
+        }
+    }
+
+        private void SetupAntiSlipPhysics()
+    {
+        Collider canCollider = GetComponent<Collider>();
+        if (canCollider != null)
+        {
+            // 高摩擦の物理マテリアルを作成
+            PhysicMaterial highFrictionMaterial = new PhysicMaterial("HighFriction");
+            highFrictionMaterial.staticFriction = 1.0f;    // 最大静止摩擦
+            highFrictionMaterial.dynamicFriction = 0.8f;   // 高い動摩擦
+            highFrictionMaterial.bounciness = 0.0f;        // 反発なし
+            highFrictionMaterial.frictionCombine = PhysicMaterialCombine.Maximum;
+            highFrictionMaterial.bounceCombine = PhysicMaterialCombine.Minimum;
+            
+            canCollider.material = highFrictionMaterial;
+            
+            // Rigidbodyの設定も調整
+            Rigidbody rb = GetComponent<Rigidbody>();
+            if (rb != null)
+            {
+                rb.drag = 2.0f;        // 空気抵抗を上げる
+                rb.angularDrag = 5.0f; // 回転抵抗を上げる
+            }
+            
+            Debug.Log("✅ 滑り防止物理設定完了");
         }
     }
     
@@ -123,6 +151,7 @@ public class IntegratedAluminumCan : MonoBehaviour
     public void ApplyGripperForceWithDirection(float force, Vector3 contactPoint, Vector3 contactNormal)
     {
         if (isCrushed) return;
+        
         
         appliedForce = force;
         lastContactPoint = contactPoint;

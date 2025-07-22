@@ -17,7 +17,7 @@ public class GripperTargetInterface : MonoBehaviour
     public ArticulationBody rightGripperBody;
     
     [Header("接触判定設定")]
-    public float gripperCloseThreshold = 0.01f;
+    public float gripperCloseThreshold = 0.015f;
     public float contactForceThreshold = 0.1f;
     public bool requireBothGrippersContact = true;
     
@@ -51,7 +51,7 @@ public class GripperTargetInterface : MonoBehaviour
         AutoFindGrippers();
         
         // トリガーの設定
-        SetupGripperColliders();
+        // SetupGripperColliders();
         
         Debug.Log($"GripperTargetInterface initialized with AluminumCan: {(target != null ? "✅" : "❌")}");
     }
@@ -59,68 +59,126 @@ public class GripperTargetInterface : MonoBehaviour
     void FixedUpdate()
     {
         UpdateGripperState();
+        LogContactState();
         TransferForceToTarget();
     }
     
-    private void TransferForceToTarget()
-    {
-        if (target == null || simpleGripperController == null) return;
-        
-        bool canTransferForce = isGripperClosed && HasValidContact();
-        
-        if (!canTransferForce)
+        // GripperTargetInterface.cs の TransferForceToTarget() メソッドに追加
+        private void TransferForceToTarget()
         {
-            hasLoggedForceTransfer = false;
-            return;
-        }
-        
-        float currentForce = simpleGripperController.GetCurrentTargetForce();
-        
-        if (currentForce >= contactForceThreshold)
-        {
-            Vector3 contactPoint = CalculateContactPoint();
-            lastContactNormal = CalculateAggregateContactNormal();
-            
-            if (!hasLoggedForceTransfer)
+            if (target == null || simpleGripperController == null)
             {
-                Debug.Log($"=== アルミ缶への力伝達開始 ===");
-                Debug.Log($"接触点: {contactPoint}");
-                Debug.Log($"接触法線: {lastContactNormal}");
-                Debug.Log($"伝達力: {currentForce:F2}N");
-                hasLoggedForceTransfer = true;
+                Debug.LogWarning("⚠️ Target または GripperController が null です");
+                return;
             }
             
-            // IntegratedAluminumCan のメソッド呼び出し
+            // 基本状態のログ
+            bool canTransferForce = isGripperClosed && HasValidContact();
+            float currentForce = simpleGripperController.GetCurrentTargetForce();
+            
+            if (enableDetailedLogging)
+            {
+                Debug.Log($"[状態チェック] グリッパー閉じ: {isGripperClosed}, " +
+                        $"有効接触: {HasValidContact()}, " +
+                        $"力伝達可能: {canTransferForce}, " +
+                        $"現在力: {currentForce:F2}N");
+            }
+            
+            if (!canTransferForce)
+            {
+                if (!hasLoggedForceTransfer)
+                {
+                    Debug.LogWarning($"❌ 力伝達不可 - グリッパー閉じ: {isGripperClosed}, 接触: {HasValidContact()}");
+                }
+                return;
+            }
+            
+            // 力伝達の実行とログ
+            Vector3 contactPoint = CalculateContactPoint();
             target.ApplyGripperForceWithDirection(currentForce, contactPoint, lastContactNormal);
             
-            Debug.Log($"アルミ缶に力を適用: {currentForce:F2}N");
+            if (enableDetailedLogging)
+            {
+                Debug.Log($"✅ 力伝達実行: {currentForce:F2}N → 接触点: {contactPoint}");
+            }
         }
-        else
-        {
-            hasLoggedForceTransfer = false;
-            Debug.Log($"力が閾値以下: {currentForce:F2}N < {contactForceThreshold:F2}N");
-        }
-    }
     
+        
+    // GripperTargetInterface.cs の AutoFindGrippers() メソッドを診断機能付きで拡張
+
     private void AutoFindGrippers()
     {
+        Debug.Log("🔍 グリッパー自動検索開始...");
+        
+        // すべてのArticulationBodyを検索
         ArticulationBody[] allBodies = FindObjectsOfType<ArticulationBody>();
+        Debug.Log($"見つかったArticulationBody数: {allBodies.Length}");
         
         foreach (var body in allBodies)
         {
-            if (body.name.Contains("left_gripper"))
+            Debug.Log($"  - {body.name} (親: {(body.transform.parent ? body.transform.parent.name : "なし")})");
+            
+            if (body.name.ToLower().Contains("left") && body.name.ToLower().Contains("gripper"))
             {
                 leftGripperBody = body;
-                leftGripperTip = body.transform;
-                if (enableDetailedLogging)
-                    Debug.Log($"Found left gripper: {body.name}");
+                Debug.Log($"✅ 左グリッパー発見: {body.name}");
             }
-            else if (body.name.Contains("right_gripper"))
+            else if (body.name.ToLower().Contains("right") && body.name.ToLower().Contains("gripper"))
             {
                 rightGripperBody = body;
-                rightGripperTip = body.transform;
-                if (enableDetailedLogging)
-                    Debug.Log($"Found right gripper: {body.name}");
+                Debug.Log($"✅ 右グリッパー発見: {body.name}");
+            }
+        }
+        
+        // Transform検索（Tipを探す）
+        Transform[] allTransforms = FindObjectsOfType<Transform>();
+        Debug.Log($"見つかったTransform数: {allTransforms.Length}");
+        
+        foreach (var trans in allTransforms)
+        {
+            if ((trans.name.ToLower().Contains("left") && trans.name.ToLower().Contains("gripper")) ||
+                trans.name.ToLower().Contains("left_gripper"))
+            {
+                if (trans.name.ToLower().Contains("tip") || trans.name.ToLower().Contains("finger"))
+                {
+                    leftGripperTip = trans;
+                    Debug.Log($"✅ 左グリッパーTip発見: {trans.name}");
+                }
+            }
+            else if ((trans.name.ToLower().Contains("right") && trans.name.ToLower().Contains("gripper")) ||
+                    trans.name.ToLower().Contains("right_gripper"))
+            {
+                if (trans.name.ToLower().Contains("tip") || trans.name.ToLower().Contains("finger"))
+                {
+                    rightGripperTip = trans;
+                    Debug.Log($"✅ 右グリッパーTip発見: {trans.name}");
+                }
+            }
+        }
+        
+        // 結果の確認
+        Debug.Log("=== グリッパー検索結果 ===");
+        Debug.Log($"左グリッパーBody: {(leftGripperBody != null ? leftGripperBody.name : "❌ 未発見")}");
+        Debug.Log($"右グリッパーBody: {(rightGripperBody != null ? rightGripperBody.name : "❌ 未発見")}");
+        Debug.Log($"左グリッパーTip: {(leftGripperTip != null ? leftGripperTip.name : "❌ 未発見")}");
+        Debug.Log($"右グリッパーTip: {(rightGripperTip != null ? rightGripperTip.name : "❌ 未発見")}");
+        
+        // 手動で設定が必要かもしれない場合の案内
+        if (leftGripperBody == null || rightGripperBody == null || leftGripperTip == null || rightGripperTip == null)
+        {
+            Debug.LogWarning("⚠️ 一部のグリッパーコンポーネントが見つかりませんでした。");
+            Debug.LogWarning("Inspectorで手動設定してください。");
+            
+            // 参考のため、gripper関連の全オブジェクト名をリストアップ
+            Debug.Log("=== Gripper関連オブジェクト一覧 ===");
+            foreach (var trans in allTransforms)
+            {
+                if (trans.name.ToLower().Contains("gripper") || 
+                    trans.name.ToLower().Contains("finger") ||
+                    trans.name.ToLower().Contains("tip"))
+                {
+                    Debug.Log($"  候補: {trans.name} (親: {(trans.parent ? trans.parent.name : "なし")})");
+                }
             }
         }
     }
@@ -151,82 +209,261 @@ public class GripperTargetInterface : MonoBehaviour
         }
         else
         {
-            existingCollider.isTrigger = true;
+            existingCollider.isTrigger = false;
         }
         
         // 距離ベースの接触検出を使用（SimpleContactDetectorは使わない）
         Debug.Log($"Setup gripper collider for {(isLeft ? "left" : "right")} gripper: {gripperObj.name}");
     }
     
-    private void UpdateGripperState()
+    // // UpdateGripperState() メソッドに追加
+    // private void UpdateGripperState()
+    // {
+    //     // 現在の位置を取得
+    //     if (leftGripperBody != null)
+    //         currentLeftPosition = leftGripperBody.jointPosition[0];
+    //     if (rightGripperBody != null)
+    //         currentRightPosition = rightGripperBody.jointPosition[0];
+
+    //     float gripperDistance = Mathf.Abs(currentLeftPosition - currentRightPosition);
+    //     bool wasGripperClosed = isGripperClosed;
+    //     isGripperClosed = gripperDistance < gripperCloseThreshold;
+
+    //     // 詳細な診断ログを追加
+    //     if (enableDetailedLogging)
+    //     {
+    //         Debug.Log($"🔍 グリッパー診断:");
+    //         Debug.Log($"  左位置: {currentLeftPosition:F4}");
+    //         Debug.Log($"  右位置: {currentRightPosition:F4}");
+    //         Debug.Log($"  距離: {gripperDistance:F4}");
+    //         Debug.Log($"  閉じ閾値: {gripperCloseThreshold:F4}");
+    //         Debug.Log($"  閉じ状態: {isGripperClosed}");
+    //         Debug.Log($"  左グリッパーBody: {(leftGripperBody != null ? "✅" : "❌")}");
+    //         Debug.Log($"  右グリッパーBody: {(rightGripperBody != null ? "✅" : "❌")}");
+            
+    //         // ArticulationBodyの詳細状態
+    //         if (leftGripperBody != null)
+    //         {
+    //             var leftDrive = leftGripperBody.xDrive;
+    //             Debug.Log($"  左ドライブ - Target: {leftDrive.target:F4}, Force: {leftDrive.forceLimit:F2}");
+    //         }
+            
+    //         if (rightGripperBody != null)
+    //         {
+    //             var rightDrive = rightGripperBody.xDrive;
+    //             Debug.Log($"  右ドライブ - Target: {rightDrive.target:F4}, Force: {rightDrive.forceLimit:F2}");
+    //         }
+    //     }
+
+    //     // 状態変化時のログ
+    //     if (wasGripperClosed != isGripperClosed)
+    //     {
+    //         Debug.Log($"🔄 グリッパー状態変化: {(isGripperClosed ? "閉じた" : "開いた")} " +
+    //                 $"(距離: {gripperDistance:F4}, 閾値: {gripperCloseThreshold:F4})");
+    //     }
+    // }
+
+    // 接触検出の詳細ログも追加
+    private void LogContactState()
     {
-        if (leftGripperBody != null && rightGripperBody != null)
+        if (enableDetailedLogging && Time.time % 0.5f < Time.deltaTime)
         {
-            currentLeftPosition = leftGripperBody.xDrive.target;
-            currentRightPosition = rightGripperBody.xDrive.target;
+            Debug.Log($"📍 接触状態診断:");
+            Debug.Log($"  左グリッパー接触: {leftGripperInContact}");
+            Debug.Log($"  右グリッパー接触: {rightGripperInContact}");
+            Debug.Log($"  両方接触必要: {requireBothGrippersContact}");
+            Debug.Log($"  有効接触: {HasValidContact()}");
+            Debug.Log($"  左接触点: {leftContactPoint}");
+            Debug.Log($"  右接触点: {rightContactPoint}");
             
-            bool leftClosed = currentLeftPosition <= -gripperCloseThreshold;
-            bool rightClosed = currentRightPosition >= gripperCloseThreshold;
-            
-            isGripperClosed = leftClosed && rightClosed;
+            // アルミ缶の位置も確認
+            if (target != null)
+            {
+                Debug.Log($"  アルミ缶位置: {target.transform.position}");
+                Debug.Log($"  左グリッパーとの距離: {Vector3.Distance(leftGripperTip.position, target.transform.position):F3}");
+                Debug.Log($"  右グリッパーとの距離: {Vector3.Distance(rightGripperTip.position, target.transform.position):F3}");
+            }
         }
-        
-        // 距離ベースの接触検出
-        UpdateDistanceBasedContact();
-        
-        if (leftGripperInContact || rightGripperInContact)
+    }
+
+        // OnTriggerEnter と OnTriggerExit にログを追加
+    void OnTriggerEnter(Collider other)
+    {
+        if (other.CompareTag("AluminumCan"))
         {
-            CalculateGripperForceDirection();
+            bool wasLeftContact = leftGripperInContact;
+            bool wasRightContact = rightGripperInContact;
+            
+            if (transform.name.Contains("left"))
+            {
+                leftGripperInContact = true;
+                leftContactPoint = other.ClosestPoint(transform.position);
+            }
+            else if (transform.name.Contains("right"))
+            {
+                rightGripperInContact = true;
+                rightContactPoint = other.ClosestPoint(transform.position);
+            }
+            
+            if (enableDetailedLogging)
+            {
+                Debug.Log($"📍 接触検出: {transform.name} → {other.name} " +
+                        $"at {(transform.name.Contains("left") ? leftContactPoint : rightContactPoint)}");
+            }
+        }
+    }
+    // GripperTargetInterface.cs の UpdateDistanceBasedContact() を修正
+
+private void UpdateDistanceBasedContact()
+{
+    if (target == null || leftGripperTip == null || rightGripperTip == null) return;
+    
+    // アルミ缶のサイズを考慮した接触判定
+    float canRadius = 0.03f; // アルミ缶の半径（推定3cm）
+    float contactThreshold = 0.04f; // 接触とみなす距離（2cm）
+    
+    // 左グリッパーの接触チェック
+    Vector3 leftToCanCenter = target.transform.position - leftGripperTip.position;
+    float leftDistanceToCenter = leftToCanCenter.magnitude;
+    
+    // アルミ缶表面までの距離を計算
+    float leftDistanceToSurface = leftDistanceToCenter - canRadius;
+    bool wasLeftInContact = leftGripperInContact;
+    leftGripperInContact = leftDistanceToSurface <= contactThreshold;
+    
+    // 右グリッパーの接触チェック  
+    Vector3 rightToCanCenter = target.transform.position - rightGripperTip.position;
+    float rightDistanceToCenter = rightToCanCenter.magnitude;
+    
+    // アルミ缶表面までの距離を計算
+    float rightDistanceToSurface = rightDistanceToCenter - canRadius;
+    bool wasRightInContact = rightGripperInContact;
+    rightGripperInContact = rightDistanceToSurface <= contactThreshold;
+    
+    // 詳細ログ（デバッグ用）
+    if (enableDetailedLogging)
+    {
+        Debug.Log($"🔍 正しい接触検出:");
+        Debug.Log($"  缶半径: {canRadius:F3}m, 接触閾値: {contactThreshold:F3}m");
+        Debug.Log($"  左グリッパー → 缶中心: {leftDistanceToCenter:F3}m");
+        Debug.Log($"  左グリッパー → 缶表面: {leftDistanceToSurface:F3}m → 接触: {leftGripperInContact}");
+        Debug.Log($"  右グリッパー → 缶中心: {rightDistanceToCenter:F3}m");
+        Debug.Log($"  右グリッパー → 缶表面: {rightDistanceToSurface:F3}m → 接触: {rightGripperInContact}");
+        Debug.Log($"  有効接触: {HasValidContact()}");
+    }
+    
+    // 接触点と法線の更新
+    if (leftGripperInContact)
+    {
+        // 缶表面上の接触点を計算
+        leftContactPoint = target.transform.position - leftToCanCenter.normalized * canRadius;
+        leftContactNormal = leftToCanCenter.normalized;
+    }
+    
+    if (rightGripperInContact)
+    {
+        // 缶表面上の接触点を計算
+        rightContactPoint = target.transform.position - rightToCanCenter.normalized * canRadius;
+        rightContactNormal = rightToCanCenter.normalized;
+    }
+    
+    // 接触状態の変化をログ
+    if (leftGripperInContact != wasLeftInContact)
+    {
+        Debug.Log($"🔄 左グリッパー接触変化: {leftGripperInContact} (表面距離: {leftDistanceToSurface:F3}m)");
+    }
+    
+    if (rightGripperInContact != wasRightInContact)
+    {
+        Debug.Log($"🔄 右グリッパー接触変化: {rightGripperInContact} (表面距離: {rightDistanceToSurface:F3}m)");
+    }
+}
+
+// より高度な接触検出（オプション）
+private void UpdateAdvancedContactDetection()
+{
+    if (target == null || leftGripperTip == null || rightGripperTip == null) return;
+    
+    // アルミ缶のColliderを使用した正確な接触判定
+    Collider canCollider = target.GetComponent<Collider>();
+    if (canCollider == null) return;
+    
+    float contactThreshold = 0.04f; // 2cm以内で接触
+    
+    // 左グリッパーの最近点を取得
+    Vector3 leftClosestPoint = canCollider.ClosestPoint(leftGripperTip.position);
+    float leftDistanceToSurface = Vector3.Distance(leftGripperTip.position, leftClosestPoint);
+    bool wasLeftInContact = leftGripperInContact;
+    leftGripperInContact = leftDistanceToSurface <= contactThreshold;
+    
+    // 右グリッパーの最近点を取得
+    Vector3 rightClosestPoint = canCollider.ClosestPoint(rightGripperTip.position);
+    float rightDistanceToSurface = Vector3.Distance(rightGripperTip.position, rightClosestPoint);
+    bool wasRightInContact = rightGripperInContact;
+    rightGripperInContact = rightDistanceToSurface <= contactThreshold;
+    
+    // 詳細ログ
+    if (enableDetailedLogging)
+    {
+        Debug.Log($"🎯 高精度接触検出:");
+        Debug.Log($"  左最近点: {leftClosestPoint}");
+        Debug.Log($"  左表面距離: {leftDistanceToSurface:F3}m → 接触: {leftGripperInContact}");
+        Debug.Log($"  右最近点: {rightClosestPoint}");
+        Debug.Log($"  右表面距離: {rightDistanceToSurface:F3}m → 接触: {rightGripperInContact}");
+    }
+    
+    // 接触点と法線の更新
+    if (leftGripperInContact)
+    {
+        leftContactPoint = leftClosestPoint;
+        leftContactNormal = (leftGripperTip.position - leftClosestPoint).normalized;
+    }
+    
+    if (rightGripperInContact)
+    {
+        rightContactPoint = rightClosestPoint;
+        rightContactNormal = (rightGripperTip.position - rightClosestPoint).normalized;
+    }
+    
+    // 変化ログ
+    if (leftGripperInContact != wasLeftInContact)
+    {
+        Debug.Log($"🔄 左グリッパー接触変化(高精度): {leftGripperInContact}");
+    }
+    
+    if (rightGripperInContact != wasRightInContact)
+    {
+        Debug.Log($"🔄 右グリッパー接触変化(高精度): {rightGripperInContact}");
+    }
+}
+
+// UpdateGripperState()で呼び出す部分を変更
+private void UpdateGripperState()
+{
+    // グリッパー閉じ判定（既存コード）
+    if (leftGripperBody != null && rightGripperBody != null)
+    {
+        currentLeftPosition = leftGripperBody.jointPosition[0];
+        currentRightPosition = rightGripperBody.jointPosition[0];
+        
+        float gripperDistance = Mathf.Abs(currentLeftPosition - currentRightPosition);
+        bool wasGripperClosed = isGripperClosed;
+        isGripperClosed = gripperDistance < gripperCloseThreshold;
+        
+        if (enableDetailedLogging && wasGripperClosed != isGripperClosed)
+        {
+            Debug.Log($"🔄 グリッパー状態変化: {(isGripperClosed ? "閉じた" : "開いた")}");
         }
     }
     
-    /// <summary>
-    /// 距離ベースの接触検出（SimpleContactDetectorの代替）
-    /// </summary>
-    private void UpdateDistanceBasedContact()
+    // 新しい接触検出を使用
+    UpdateAdvancedContactDetection(); // または UpdateDistanceBasedContact();
+    
+    if (leftGripperInContact || rightGripperInContact)
     {
-        if (target == null) return;
-        
-        float contactDistance = 0.05f; // 5cm以内で接触とみなす
-        
-        // 左グリッパーの接触チェック
-        if (leftGripperTip != null)
-        {
-            float leftDistance = Vector3.Distance(leftGripperTip.position, target.transform.position);
-            bool wasInContact = leftGripperInContact;
-            leftGripperInContact = leftDistance <= contactDistance;
-            
-            if (leftGripperInContact)
-            {
-                leftContactPoint = target.transform.position;
-            }
-            
-            // 接触状態の変化をログ出力
-            if (leftGripperInContact != wasInContact && enableDetailedLogging)
-            {
-                Debug.Log($"Left gripper contact: {leftGripperInContact} (distance: {leftDistance:F3}m)");
-            }
-        }
-        
-        // 右グリッパーの接触チェック
-        if (rightGripperTip != null)
-        {
-            float rightDistance = Vector3.Distance(rightGripperTip.position, target.transform.position);
-            bool wasInContact = rightGripperInContact;
-            rightGripperInContact = rightDistance <= contactDistance;
-            
-            if (rightGripperInContact)
-            {
-                rightContactPoint = target.transform.position;
-            }
-            
-            // 接触状態の変化をログ出力
-            if (rightGripperInContact != wasInContact && enableDetailedLogging)
-            {
-                Debug.Log($"Right gripper contact: {rightGripperInContact} (distance: {rightDistance:F3}m)");
-            }
-        }
+        CalculateGripperForceDirection();
     }
+}
     
     private void CalculateGripperForceDirection()
     {
@@ -457,4 +694,159 @@ public class GripperTargetInterface : MonoBehaviour
             Gizmos.DrawRay(target.transform.position, forceDirection);
         }
     }
+
+    // GripperTargetInterface.cs に完全な診断メソッドを追加
+
+/// <summary>
+/// 完全な状態診断（コンテキストメニューから実行）
+/// </summary>
+[ContextMenu("完全診断実行")]
+public void CompleteSystemDiagnosis()
+{
+    Debug.Log("=== 🔍 完全システム診断開始 ===");
+    
+    // 1. コンポーネント存在確認
+    Debug.Log("--- 1. コンポーネント確認 ---");
+    Debug.Log($"SimpleGripperController: {(simpleGripperController != null ? "✅" : "❌")}");
+    Debug.Log($"Target (AluminumCan): {(target != null ? "✅" : "❌")}");
+    Debug.Log($"LeftGripperTip: {(leftGripperTip != null ? "✅" : "❌")}");
+    Debug.Log($"RightGripperTip: {(rightGripperTip != null ? "✅" : "❌")}");
+    Debug.Log($"LeftGripperBody: {(leftGripperBody != null ? "✅" : "❌")}");
+    Debug.Log($"RightGripperBody: {(rightGripperBody != null ? "✅" : "❌")}");
+    
+    // 2. 位置情報の詳細確認
+    Debug.Log("--- 2. 位置情報 ---");
+    if (leftGripperTip != null)
+        Debug.Log($"左グリッパー位置: {leftGripperTip.position}");
+    if (rightGripperTip != null)
+        Debug.Log($"右グリッパー位置: {rightGripperTip.position}");
+    if (target != null)
+        Debug.Log($"アルミ缶位置: {target.transform.position}");
+    
+    // 3. グリッパー間の距離
+    if (leftGripperTip != null && rightGripperTip != null)
+    {
+        float gripperDistance = Vector3.Distance(leftGripperTip.position, rightGripperTip.position);
+        Debug.Log($"グリッパー間距離: {gripperDistance:F3}m");
+        
+        Vector3 centerPoint = (leftGripperTip.position + rightGripperTip.position) * 0.5f;
+        Debug.Log($"グリッパー中心点: {centerPoint}");
+    }
+    
+    // 4. コライダー情報の詳細確認
+    Debug.Log("--- 3. コライダー情報 ---");
+    DiagnoseColliders();
+    
+    // 5. ArticulationBody の状態
+    Debug.Log("--- 4. ArticulationBody 状態 ---");
+    DiagnoseArticulationBodies();
+    
+    // 6. 接触計算の詳細
+    Debug.Log("--- 5. 接触計算詳細 ---");
+    DiagnoseContactCalculation();
+}
+
+private void DiagnoseColliders()
+{
+    // アルミ缶のコライダー
+    if (target != null)
+    {
+        Collider canCollider = target.GetComponent<Collider>();
+        if (canCollider != null)
+        {
+            Debug.Log($"アルミ缶Collider: {canCollider.GetType().Name}");
+            Debug.Log($"  IsTrigger: {canCollider.isTrigger}");
+            Debug.Log($"  Enabled: {canCollider.enabled}");
+            
+            if (canCollider is BoxCollider boxCol)
+            {
+                Debug.Log($"  BoxCollider Size: {boxCol.size}");
+                Debug.Log($"  BoxCollider Center: {boxCol.center}");
+                Debug.Log($"  World Bounds: {boxCol.bounds}");
+            }
+        }
+        else
+        {
+            Debug.LogError("❌ アルミ缶にColliderがありません！");
+        }
+    }
+    
+    // グリッパーのコライダー
+    if (leftGripperTip != null)
+    {
+        Collider[] leftColliders = leftGripperTip.GetComponents<Collider>();
+        Debug.Log($"左グリッパーCollider数: {leftColliders.Length}");
+        
+        for (int i = 0; i < leftColliders.Length; i++)
+        {
+            var col = leftColliders[i];
+            Debug.Log($"  [{i}] {col.GetType().Name}: IsTrigger={col.isTrigger}, Enabled={col.enabled}");
+        }
+    }
+    
+    if (rightGripperTip != null)
+    {
+        Collider[] rightColliders = rightGripperTip.GetComponents<Collider>();
+        Debug.Log($"右グリッパーCollider数: {rightColliders.Length}");
+        
+        for (int i = 0; i < rightColliders.Length; i++)
+        {
+            var col = rightColliders[i];
+            Debug.Log($"  [{i}] {col.GetType().Name}: IsTrigger={col.isTrigger}, Enabled={col.enabled}");
+        }
+    }
+}
+
+private void DiagnoseArticulationBodies()
+{
+    if (leftGripperBody != null)
+    {
+        Debug.Log($"左ArticulationBody: {leftGripperBody.name}");
+        Debug.Log($"  Position: {leftGripperBody.transform.position}");
+        Debug.Log($"  JointPosition: {leftGripperBody.jointPosition[0]:F4}");
+        Debug.Log($"  XDrive Target: {leftGripperBody.xDrive.target:F4}");
+    }
+    
+    if (rightGripperBody != null)
+    {
+        Debug.Log($"右ArticulationBody: {rightGripperBody.name}");
+        Debug.Log($"  Position: {rightGripperBody.transform.position}");
+        Debug.Log($"  JointPosition: {rightGripperBody.jointPosition[0]:F4}");
+        Debug.Log($"  XDrive Target: {rightGripperBody.xDrive.target:F4}");
+    }
+}
+
+private void DiagnoseContactCalculation()
+{
+    if (target == null || leftGripperTip == null || rightGripperTip == null) return;
+    
+    Collider canCollider = target.GetComponent<Collider>();
+    if (canCollider == null) return;
+    
+    // 手動で最近点を計算
+    Vector3 leftClosest = canCollider.ClosestPoint(leftGripperTip.position);
+    Vector3 rightClosest = canCollider.ClosestPoint(rightGripperTip.position);
+    
+    float leftDist = Vector3.Distance(leftGripperTip.position, leftClosest);
+    float rightDist = Vector3.Distance(rightGripperTip.position, rightClosest);
+    
+    Debug.Log($"手動計算結果:");
+    Debug.Log($"  左グリッパー → 最近点: {leftClosest} (距離: {leftDist:F3}m)");
+    Debug.Log($"  右グリッパー → 最近点: {rightClosest} (距離: {rightDist:F3}m)");
+    
+    // 最近点が同じかチェック
+    if (Vector3.Distance(leftClosest, rightClosest) < 0.001f)
+    {
+        Debug.LogWarning("⚠️ 左右の最近点が同じです！これは異常です。");
+        Debug.LogWarning("   原因: アルミ缶のColliderが小さすぎるか、グリッパーが同じ方向にある");
+    }
+    
+    // アルミ缶を中心とした距離も計算
+    float leftToCenter = Vector3.Distance(leftGripperTip.position, target.transform.position);
+    float rightToCenter = Vector3.Distance(rightGripperTip.position, target.transform.position);
+    
+    Debug.Log($"中心からの距離:");
+    Debug.Log($"  左グリッパー → 中心: {leftToCenter:F3}m");
+    Debug.Log($"  右グリッパー → 中心: {rightToCenter:F3}m");
+}
 }

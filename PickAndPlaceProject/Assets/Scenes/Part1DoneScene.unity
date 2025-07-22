@@ -2213,10 +2213,9 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 622264445}
-  - component: {fileID: 622264444}
   - component: {fileID: 622264443}
-  - component: {fileID: 622264442}
   - component: {fileID: 622264446}
+  - component: {fileID: 622264442}
   m_Layer: 8
   m_Name: AluminumCan
   m_TagString: Untagged
@@ -2233,17 +2232,18 @@ MonoBehaviour:
   m_GameObject: {fileID: 622264441}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 70ca57e48d21a61489d05a9fb5dd986d, type: 3}
+  m_Script: {fileID: 11500000, guid: 90b547e0eedf6ec4eb47cca6a3cc8668, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  softness: 0.5
-  maxDeformation: 0.3
+  normalCanModel: {fileID: 806208462}
+  crushedCanModel: {fileID: 676011064}
+  deformationThreshold: 15
   deformationSpeed: 2
-  enableVisualDeformation: 1
-  breakingForce: 50
-  compressionResistance: 15
-  originalColor: {r: 1, g: 1, b: 1, a: 1}
-  enableDebugLogs: 0
+  crushSound: {fileID: 0}
+  audioSource: {fileID: 0}
+  canMass: 0.015
+  showDebugInfo: 1
+  showForceGizmos: 1
 --- !u!54 &622264443
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -2260,25 +2260,6 @@ Rigidbody:
   m_Interpolate: 0
   m_Constraints: 0
   m_CollisionDetection: 0
---- !u!114 &622264444
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 622264441}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: b57e258fff40d5645a1e5a0948633051, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  normalCanModel: {fileID: 806208462}
-  crushedCanModel: {fileID: 676011064}
-  deformationThreshold: 15
-  crushSound: {fileID: 0}
-  audioSource: {fileID: 0}
-  showForceDebug: 1
-  showForceGizmos: 1
 --- !u!4 &622264445
 Transform:
   m_ObjectHideFlags: 0
@@ -2296,8 +2277,8 @@ Transform:
   m_Father: {fileID: 0}
   m_RootOrder: 4
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!64 &622264446
-MeshCollider:
+--- !u!65 &622264446
+BoxCollider:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
@@ -2306,10 +2287,9 @@ MeshCollider:
   m_Material: {fileID: 0}
   m_IsTrigger: 0
   m_Enabled: 1
-  serializedVersion: 4
-  m_Convex: 1
-  m_CookingOptions: 30
-  m_Mesh: {fileID: -2432090755550338912, guid: 9452375401b687b4bb4c6b0bd54d03d1, type: 3}
+  serializedVersion: 2
+  m_Size: {x: 2, y: 4, z: 4}
+  m_Center: {x: 0, y: 2, z: 0}
 --- !u!4 &635784318 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 178561158468836152, guid: 4143f41bf12af4b399c9956cfd8dc36b, type: 3}
@@ -3097,7 +3077,7 @@ MonoBehaviour:
       m_Calls:
       - m_Target: {fileID: 853727501}
         m_TargetAssemblyTypeName: TrajectoryPlannerDeform, Unity.Robotics.PickAndPlace
-        m_MethodName: PublishJointsWithDeformation
+        m_MethodName: PublishJointsWithAluminumCan
         m_Mode: 1
         m_Arguments:
           m_ObjectArgument: {fileID: 0}
@@ -6075,9 +6055,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: dffa243396da20e4a8636701ed00878a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  baseGripForce: 10
+  baseGripForce: 7.4
   forceVariability: 0.1
-  forceChangeRate: 1
+  forceChangeRate: 0.38
   showDebugInfo: 1
 --- !u!4 &1124406059
 Transform:
@@ -7369,12 +7349,12 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   simpleGripperController: {fileID: 1124406058}
-  target: {fileID: 0}
+  target: {fileID: 622264442}
   leftGripperTip: {fileID: 1634691826}
   rightGripperTip: {fileID: 1950722835}
   leftGripperBody: {fileID: 695127894}
   rightGripperBody: {fileID: 940780296}
-  gripperCloseThreshold: 0.005
+  gripperCloseThreshold: 0.015
   contactForceThreshold: 0.5
   requireBothGrippersContact: 1
   showContactGizmos: 1
