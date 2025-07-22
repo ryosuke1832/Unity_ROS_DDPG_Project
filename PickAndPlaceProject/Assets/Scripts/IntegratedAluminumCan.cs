@@ -9,6 +9,9 @@ public class IntegratedAluminumCan : MonoBehaviour
     [Header("3Dモデル設定")]
     [Tooltip("正常なアルミ缶のGameObject")]
     public GameObject normalCanModel;
+
+        [Header("制御システム連携")]
+    public SimpleGripperForceController simpleGripperController; // ★ publicに変更してInspectorで設定可能に
     
     [Tooltip("つぶれたアルミ缶のGameObject")]
     public GameObject crushedCanModel;
@@ -37,40 +40,67 @@ public class IntegratedAluminumCan : MonoBehaviour
     [Header("デバッグ設定")]
     public bool showDebugInfo = true;
     public bool showForceGizmos = true;
+    public bool enableCrushAnimation = true;
+    
+
     
     // 内部状態
     private bool isCrushed = false;
     private float appliedForce = 0f;
-    private float accumulatedForce = 0f;
     private Vector3 lastContactPoint = Vector3.zero;
     private Vector3 lastContactNormal = Vector3.up;
     private Rigidbody canRigidbody;
+    private Vector3 originalScale;
     
     // プロパティ（BasicTypes.csとの互換性用）
     public bool IsBroken => isCrushed;
-    public float CurrentDeformation => isCrushed ? 1f : (accumulatedForce / deformationThreshold);
+    public float CurrentDeformation => isCrushed ? 1f : 0f; // 蓄積力を使わない
     public MaterialType MaterialType => MaterialType.Metal;
     public float Softness => 0.1f; // 硬い材質
-    
+
+    /// <summary>
+    /// 初期化処理
+    /// </summary>
     void Start()
     {
+        originalScale = transform.localScale;
+        
+        // コンポーネント初期化
         InitializeComponents();
-        SetupAntiSlipPhysics(); 
         SetupInitialState();
+        SetupAntiSlipPhysics();
+        
+        // SimpleGripperControllerを探す（publicフィールドが設定されていない場合）
+        if (simpleGripperController == null)
+        {
+            simpleGripperController = FindObjectOfType<SimpleGripperForceController>();
+        }
+        
+        if (simpleGripperController == null)
+        {
+            Debug.LogWarning("SimpleGripperForceController が見つかりません。固定閾値を使用します。");
+        }
+        else
+        {
+            Debug.Log($"SimpleGripperForceController 見つかりました。baseGripForce: {simpleGripperController.baseGripForce:F2}N");
+        }
+        
+        Debug.Log("IntegratedAluminumCan 初期化完了");
     }
     
+    /// <summary>
+    /// 蓄積力システムを廃止したUpdateメソッド
+    /// </summary>
     void Update()
     {
-        UpdateForceDecay();
-        CheckForceThreshold();
-        
-        if (showDebugInfo)
+        // アニメーション更新のみ保持
+        if (isCrushed && enableCrushAnimation)
         {
-            DisplayDebugInfo();
+            UpdateCrushAnimation();
         }
     }
 
-        private void SetupAntiSlipPhysics()
+    private void SetupAntiSlipPhysics()
     {
         Collider canCollider = GetComponent<Collider>();
         if (canCollider != null)
@@ -141,29 +171,67 @@ public class IntegratedAluminumCan : MonoBehaviour
         
         isCrushed = false;
         appliedForce = 0f;
-        accumulatedForce = 0f;
     }
     
     /// <summary>
     /// IGrippableObject インターフェースの実装
-    /// グリッパーからの力を受け取る
+    /// グリッパーからの力を受け取る - 修正版
     /// </summary>
     public void ApplyGripperForceWithDirection(float force, Vector3 contactPoint, Vector3 contactNormal)
     {
         if (isCrushed) return;
         
-        
         appliedForce = force;
         lastContactPoint = contactPoint;
         lastContactNormal = contactNormal;
         
-        // 力を蓄積（連続的な圧力の効果）
-        accumulatedForce += force * Time.deltaTime * deformationSpeed;
-        accumulatedForce = Mathf.Min(accumulatedForce, deformationThreshold * 2f);
-        
         if (showDebugInfo && Time.frameCount % 30 == 0) // 30フレームごとにログ
         {
-            Debug.Log($"アルミ缶に力適用: {force:F2}N, 蓄積力: {accumulatedForce:F2}N, 閾値: {deformationThreshold:F2}N");
+            Debug.Log($"アルミ缶に力適用: {force:F2}N, 変形閾値計算中...");
+        }
+        
+        // ★ 新しい変形判定: 現在の力が閾値を超えた場合のみ変形
+        CheckForceThresholdDirect(force);
+    }
+    
+    /// <summary>
+    /// 直接的な力による変形判定 - 修正版
+    /// </summary>
+    void CheckForceThresholdDirect(float currentForce)
+    {
+        if (isCrushed) return;
+        
+        // SimpleGripperControllerのbaseGripForceと比較
+        if (simpleGripperController != null)
+        {
+            float baseForce = simpleGripperController.baseGripForce;
+            
+            // baseGripForceの1.5倍を超えた場合のみ変形開始
+            // 例：baseGripForce=10Nなら15N以上で変形
+            float actualThreshold = baseForce * 1.5f;
+            
+            if (currentForce > actualThreshold)
+            {
+                if (!isCrushed)
+                {
+                    Debug.Log($"🔥 アルミ缶変形開始！現在力: {currentForce:F2}N > 閾値: {actualThreshold:F2}N (baseGripForce: {baseForce:F2}N × 1.5)");
+                    StartCrushAnimation();
+                    isCrushed = true;
+                }
+            }
+        }
+        else
+        {
+            // フォールバック：SimpleGripperControllerが見つからない場合は固定閾値
+            if (currentForce > deformationThreshold)
+            {
+                if (!isCrushed)
+                {
+                    Debug.Log($"🔥 アルミ缶変形開始！現在力: {currentForce:F2}N > 固定閾値: {deformationThreshold:F2}N");
+                    StartCrushAnimation();
+                    isCrushed = true;
+                }
+            }
         }
     }
     
@@ -176,40 +244,10 @@ public class IntegratedAluminumCan : MonoBehaviour
     }
     
     /// <summary>
-    /// 力の減衰処理
+    /// つぶれアニメーション開始
     /// </summary>
-    void UpdateForceDecay()
+    void StartCrushAnimation()
     {
-        if (appliedForce <= 0f && accumulatedForce > 0f)
-        {
-            // 力が加わっていない時は蓄積力を徐々に減らす
-            accumulatedForce -= Time.deltaTime * deformationSpeed * 0.5f;
-            accumulatedForce = Mathf.Max(0f, accumulatedForce);
-        }
-    }
-    
-    /// <summary>
-    /// 変形閾値のチェック
-    /// </summary>
-    void CheckForceThreshold()
-    {
-        if (isCrushed) return;
-        
-        if (accumulatedForce >= deformationThreshold)
-        {
-            CrushCan();
-        }
-    }
-    
-    /// <summary>
-    /// アルミ缶をつぶす処理
-    /// </summary>
-    void CrushCan()
-    {
-        if (isCrushed) return;
-        
-        Debug.Log($"🥫 アルミ缶がつぶれました！ 蓄積力: {accumulatedForce:F2}N");
-        
         // モデルの入れ替え
         SwapModels();
         
@@ -218,8 +256,14 @@ public class IntegratedAluminumCan : MonoBehaviour
         
         // 物理特性の調整
         AdjustPhysicsProperties();
-        
-        isCrushed = true;
+    }
+    
+    /// <summary>
+    /// つぶれアニメーションの更新
+    /// </summary>
+    void UpdateCrushAnimation()
+    {
+        // 必要に応じてアニメーション処理を追加
     }
     
     /// <summary>
@@ -265,18 +309,6 @@ public class IntegratedAluminumCan : MonoBehaviour
     }
     
     /// <summary>
-    /// デバッグ情報の表示
-    /// </summary>
-    void DisplayDebugInfo()
-    {
-        if (Time.frameCount % 60 == 0) // 1秒ごとに更新
-        {
-            string status = isCrushed ? "つぶれた" : "正常";
-            Debug.Log($"缶の状態: {status}, 現在の力: {appliedForce:F2}N, 蓄積力: {accumulatedForce:F2}N");
-        }
-    }
-    
-    /// <summary>
     /// 現在の状態を取得
     /// </summary>
     public ObjectState GetCurrentState()
@@ -287,17 +319,45 @@ public class IntegratedAluminumCan : MonoBehaviour
             deformation = CurrentDeformation,
             isBroken = this.isCrushed,
             isBeingGrasped = appliedForce > 0f,
-            materialType = (int)MaterialType.Metal, // 明示的にキャスト
+            materialType = (int)MaterialType.Metal,
             softness = this.Softness
         };
     }
     
     /// <summary>
-    /// 蓄積力を取得（デバッグ用）
+    /// デバッグ用GUI表示
     /// </summary>
-    public float GetAccumulatedForce()
+    void OnGUI()
     {
-        return accumulatedForce;
+        if (!showDebugInfo) return;
+        
+        GUIStyle style = new GUIStyle();
+        style.normal.textColor = Color.white;
+        style.fontSize = 12;
+        
+        GUI.Label(new Rect(10, 10, 300, 20), $"缶の状態: {(isCrushed ? "つぶれた" : "正常")}", style);
+        GUI.Label(new Rect(10, 30, 300, 20), $"現在の力: {appliedForce:F2}N", style);
+        
+        if (simpleGripperController != null)
+        {
+            float baseForce = simpleGripperController.baseGripForce;
+            float threshold = baseForce * 1.5f;
+            GUI.Label(new Rect(10, 50, 300, 20), $"BaseGripForce: {baseForce:F2}N", style);
+            GUI.Label(new Rect(10, 70, 300, 20), $"変形閾値: {threshold:F2}N", style);
+            
+            // 進行状況バー
+            float progress = appliedForce / threshold;
+            GUI.Box(new Rect(10, 90, 200, 20), "");
+            if (progress > 0)
+            {
+                GUI.Box(new Rect(10, 90, 200 * Mathf.Min(progress, 1f), 20), "");
+            }
+            GUI.Label(new Rect(10, 90, 200, 20), $"力レベル: {(progress * 100):F1}%", style);
+        }
+        else
+        {
+            GUI.Label(new Rect(10, 50, 300, 20), $"固定閾値: {deformationThreshold:F2}N", style);
+        }
     }
     
     /// <summary>
@@ -320,16 +380,6 @@ public class IntegratedAluminumCan : MonoBehaviour
     }
     
     /// <summary>
-    /// 強制的に缶をつぶす（テスト用）
-    /// </summary>
-    [ContextMenu("Force Crush")]
-    public void ForceCrush()
-    {
-        accumulatedForce = deformationThreshold + 1f;
-        CrushCan();
-    }
-    
-    /// <summary>
     /// Gizmoの描画（エディタ用）
     /// </summary>
     void OnDrawGizmos()
@@ -346,42 +396,13 @@ public class IntegratedAluminumCan : MonoBehaviour
         // 力の可視化
         if (appliedForce > 0f)
         {
-            Gizmos.color = accumulatedForce >= deformationThreshold ? Color.red : Color.green;
+            Gizmos.color = isCrushed ? Color.red : Color.green;
             Gizmos.DrawRay(transform.position, lastContactNormal * (appliedForce * 0.01f));
         }
-        
-        // 蓄積力のバー表示
-        float barHeight = (accumulatedForce / deformationThreshold) * 0.1f;
-        Gizmos.color = Color.blue;
-        Gizmos.DrawCube(transform.position + Vector3.up * 0.15f, new Vector3(0.02f, barHeight, 0.02f));
-    }
-    
-    /// <summary>
-    /// インスペクター上での情報表示
-    /// </summary>
-    void OnGUI()
-    {
-        if (!showDebugInfo) return;
-        
-        GUIStyle style = new GUIStyle();
-        style.fontSize = 14;
-        style.normal.textColor = Color.white;
-        
-        GUI.Label(new Rect(10, 10, 300, 20), $"缶の状態: {(isCrushed ? "つぶれた" : "正常")}", style);
-        GUI.Label(new Rect(10, 30, 300, 20), $"現在の力: {appliedForce:F2}N", style);
-        GUI.Label(new Rect(10, 50, 300, 20), $"蓄積力: {accumulatedForce:F2}N", style);
-        GUI.Label(new Rect(10, 70, 300, 20), $"変形閾値: {deformationThreshold:F2}N", style);
-        
-        // 進行状況バー
-        float progress = accumulatedForce / deformationThreshold;
-        GUI.Box(new Rect(10, 90, 200, 20), "");
-        GUI.Box(new Rect(10, 90, 200 * progress, 20), "");
-        GUI.Label(new Rect(10, 90, 200, 20), $"変形進行: {(progress * 100):F1}%", style);
     }
 }
 
-// 既存のBasicTypes.csのObjectStateを使用するため、重複定義を削除
-
+// BasicTypes.csとの互換性のためのenum定義
 public enum MaterialType
 {
     Soft,
