@@ -11,7 +11,7 @@ public class IntegratedAluminumCan : MonoBehaviour
     public GameObject normalCanModel;
 
         [Header("制御システム連携")]
-    public SimpleGripperForceController simpleGripperController; // ★ publicに変更してInspectorで設定可能に
+    public SimpleGripForceController simpleGripperController; // ★ publicに変更してInspectorで設定可能に
     
     [Tooltip("つぶれたアルミ缶のGameObject")]
     public GameObject crushedCanModel;
@@ -73,7 +73,7 @@ public class IntegratedAluminumCan : MonoBehaviour
         // SimpleGripperControllerを探す（publicフィールドが設定されていない場合）
         if (simpleGripperController == null)
         {
-            simpleGripperController = FindObjectOfType<SimpleGripperForceController>();
+            simpleGripperController = FindObjectOfType<SimpleGripForceController>();
         }
         
         if (simpleGripperController == null)
@@ -87,7 +87,8 @@ public class IntegratedAluminumCan : MonoBehaviour
         
         Debug.Log("IntegratedAluminumCan 初期化完了");
     }
-    
+
+        
     /// <summary>
     /// 蓄積力システムを廃止したUpdateメソッド
     /// </summary>

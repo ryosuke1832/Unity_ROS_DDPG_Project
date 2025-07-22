@@ -646,7 +646,6 @@ private void UpdateGripperState()
         var state = target.GetCurrentState();
         Debug.Log($"缶の状態: {(state.isBroken ? "つぶれた" : "正常")}");
         Debug.Log($"適用力: {state.appliedForce:F2}N");
-        Debug.Log($"蓄積力: {target.GetAccumulatedForce():F2}N");
         Debug.Log($"変形進行: {(state.deformation * 100):F1}%");
         
         if (simpleGripperController != null)
