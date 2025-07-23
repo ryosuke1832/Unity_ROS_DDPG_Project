@@ -65,9 +65,52 @@ public class IntegratedAluminumCan : MonoBehaviour
     
     // プロパティ（BasicTypes.csとの互換性用）
     public bool IsBroken => isCrushed;
-    public float CurrentDeformation => isCrushed ? 1f : (accumulatedForce / deformationThreshold);
+    // public float CurrentDeformation => isCrushed ? 1f : (accumulatedForce / deformationThreshold);
     public MaterialType MaterialType => MaterialType.Metal;
     public float Softness => 0.1f; // 硬い材質
+
+        /// <summary>
+    /// 現在の変形進行度を計算（BaseGripForce基準）
+    /// </summary>
+    public float CurrentDeformation
+    {
+        get
+        {
+            var gripController = FindObjectOfType<SimpleGripForceController>();
+            if (gripController != null)
+            {
+                float baseGripForce = gripController.baseGripForce;
+                return Mathf.Clamp01(baseGripForce / deformationThreshold);
+            }
+            
+            // フォールバック: 従来の計算
+            return Mathf.Clamp01(appliedForce / deformationThreshold);
+        }
+    }
+
+    /// <summary>
+    /// 🔍 デバッグ: 現在の設定値をすべて表示
+    /// </summary>
+    [ContextMenu("Debug Show All Values")]
+    public void DebugShowAllValues()
+    {
+        Debug.Log("=== アルミ缶デバッグ情報 ===");
+        Debug.Log($"deformationThreshold: {deformationThreshold:F2}N");
+        Debug.Log($"isCrushed: {isCrushed}");
+        
+        var controller = FindObjectOfType<SimpleGripForceController>();
+        if (controller != null)
+        {
+            Debug.Log($"BaseGripForce: {controller.baseGripForce:F2}N");
+            Debug.Log($"比較結果: {controller.baseGripForce:F2}N vs {deformationThreshold:F2}N");
+            Debug.Log($"変形するか?: {(controller.baseGripForce > deformationThreshold ? "はい" : "いいえ")}");
+        }
+        else
+        {
+            Debug.LogError("SimpleGripForceControllerが見つかりません！");
+        }
+        Debug.Log("=========================");
+    }
     
     void Start()
     {
@@ -201,13 +244,30 @@ public class IntegratedAluminumCan : MonoBehaviour
         lastContactPoint = contactPoint;
         lastContactNormal = contactNormal;
         
-        // 力を蓄積（連続的な圧力の効果）
-        accumulatedForce += force * Time.deltaTime * deformationSpeed;
-        accumulatedForce = Mathf.Min(accumulatedForce, deformationThreshold * 2f);
-        
-        if (showDebugInfo && Time.frameCount % 30 == 0) // 30フレームごとにログ
+        // シンプルな変形判定：BaseGripForce vs deformationThreshold
+        var gripController = FindObjectOfType<SimpleGripForceController>();
+        if (gripController != null)
         {
-            Debug.Log($"アルミ缶に力適用: {force:F2}N, 蓄積力: {accumulatedForce:F2}N, 閾値: {deformationThreshold:F2}N");
+            float baseGripForce = gripController.baseGripForce;
+            
+            // BaseGripForceがdeformationThresholdを超えたら変形
+            if (baseGripForce > deformationThreshold)
+            {
+                if (!isCrushed)
+                {
+                    CrushCan();
+                    Debug.Log($"🔥 缶が変形しました！ BaseGripForce: {baseGripForce:F2}N > 変形閾値: {deformationThreshold:F2}N");
+                }
+            }
+            
+            if (showDebugInfo && Time.frameCount % 30 == 0) // 30フレームごとにログ
+            {
+                Debug.Log($"BaseGripForce: {baseGripForce:F2}N vs 変形閾値: {deformationThreshold:F2}N");
+            }
+        }
+        else
+        {
+            Debug.LogWarning("SimpleGripForceControllerが見つかりません。変形判定ができません。");
         }
     }
     
@@ -335,28 +395,7 @@ public class IntegratedAluminumCan : MonoBehaviour
         CrushCan();
     }
     
-    /// <summary>
-    /// 🔍 デバッグ: 現在の設定値をすべて表示
-    /// </summary>
-    [ContextMenu("Debug Show All Values")]
-    public void DebugShowAllValues()
-    {
-        Debug.Log("=== アルミ缶デバッグ情報 ===");
-        Debug.Log($"deformationThreshold: {deformationThreshold:F2}N");
-        Debug.Log($"deformationSpeed: {deformationSpeed:F2}");
-        Debug.Log($"canMass: {canMass:F3}kg");
-        Debug.Log($"appliedForce: {appliedForce:F2}N");
-        Debug.Log($"accumulatedForce: {accumulatedForce:F2}N");
-        Debug.Log($"isCrushed: {isCrushed}");
-        
-        var controller = FindObjectOfType<SimpleGripForceController>();
-        if (controller != null)
-        {
-            Debug.Log($"SimpleGripForceController.baseGripForce: {controller.baseGripForce:F2}N");
-            Debug.Log($"比率: {deformationThreshold / controller.baseGripForce:F3}倍");
-        }
-        Debug.Log("=========================");
-    }
+
     
     /// <summary>
     /// Gizmoの描画（エディタ用）
@@ -384,29 +423,36 @@ public class IntegratedAluminumCan : MonoBehaviour
         Gizmos.color = Color.blue;
         Gizmos.DrawCube(transform.position + Vector3.up * 0.15f, new Vector3(0.02f, barHeight, 0.02f));
     }
+/// <summary>
+/// インスペクター上での情報表示
+/// </summary>
+void OnGUI()
+{
+    if (!showDebugInfo) return;
     
-    /// <summary>
-    /// インスペクター上での情報表示
-    /// </summary>
-    void OnGUI()
+    GUIStyle style = new GUIStyle();
+    style.fontSize = 14;
+    style.normal.textColor = Color.white;
+    
+    var gripController = FindObjectOfType<SimpleGripForceController>();
+    if (gripController != null)
     {
-        if (!showDebugInfo) return;
-        
-        GUIStyle style = new GUIStyle();
-        style.fontSize = 14;
-        style.normal.textColor = Color.white;
-        
         GUI.Label(new Rect(10, 10, 300, 20), $"缶の状態: {(isCrushed ? "つぶれた" : "正常")}", style);
-        GUI.Label(new Rect(10, 30, 300, 20), $"現在の力: {appliedForce:F2}N", style);
-        GUI.Label(new Rect(10, 50, 300, 20), $"蓄積力: {accumulatedForce:F2}N", style);
-        GUI.Label(new Rect(10, 70, 300, 20), $"変形閾値: {deformationThreshold:F2}N", style);
+        GUI.Label(new Rect(10, 30, 300, 20), $"BaseGripForce: {gripController.baseGripForce:F2}N", style);
+        GUI.Label(new Rect(10, 50, 300, 20), $"変形閾値: {deformationThreshold:F2}N", style);
+        GUI.Label(new Rect(10, 70, 300, 20), $"変形判定: {(gripController.baseGripForce > deformationThreshold ? "変形" : "正常")}", style);
         
         // 進行状況バー
-        float progress = accumulatedForce / deformationThreshold;
+        float progress = gripController.baseGripForce / deformationThreshold;
         GUI.Box(new Rect(10, 90, 200, 20), "");
-        GUI.Box(new Rect(10, 90, 200 * progress, 20), "");
-        GUI.Label(new Rect(10, 90, 200, 20), $"変形進行: {(progress * 100):F1}%", style);
+        GUI.Box(new Rect(10, 90, 200 * Mathf.Clamp01(progress), 20), "");
+        GUI.Label(new Rect(10, 90, 200, 20), $"力の比率: {(progress * 100):F1}%", style);
     }
+    else
+    {
+        GUI.Label(new Rect(10, 10, 300, 20), "SimpleGripForceController not found!", style);
+    }
+}
 }
 
 public enum MaterialType
