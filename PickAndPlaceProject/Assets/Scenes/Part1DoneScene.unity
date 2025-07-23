@@ -2237,7 +2237,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   normalCanModel: {fileID: 806208462}
   crushedCanModel: {fileID: 676011064}
-  deformationThreshold: 15
+  _deformationThreshold: 15
   deformationSpeed: 2
   crushSound: {fileID: 0}
   audioSource: {fileID: 0}
@@ -6055,7 +6055,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: dffa243396da20e4a8636701ed00878a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  baseGripForce: 7.4
+  baseGripForce: 17.3
   forceVariability: 0.1
   forceChangeRate: 0.38
   showDebugInfo: 1
