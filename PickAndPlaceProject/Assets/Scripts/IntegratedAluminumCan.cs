@@ -1,4 +1,5 @@
 using UnityEngine;
+using System.Collections;
 
 /// <summary>
 /// 統合されたアルミ缶変形システム（デバッグ版）
@@ -17,6 +18,11 @@ public class IntegratedAluminumCan : MonoBehaviour
     [Range(1f, 100f)]
     [Tooltip("変形が発生する力の閾値（N）")]
     [SerializeField] private float _deformationThreshold = 15f;
+
+    private const float DEFORMATION_DELAY = 0.2f; // 0.2秒の遅延
+
+
+    
     
     // 🔍 デバッグ用のプロパティ
     public float deformationThreshold 
@@ -312,6 +318,19 @@ public class IntegratedAluminumCan : MonoBehaviour
     {
         if (isCrushed) return;
         
+        // 0.2秒待ってからつぶす
+        StartCoroutine(CrushAfterDelay());
+    }
+
+    /// <summary>
+    /// 遅延後につぶす
+    /// </summary>
+    IEnumerator CrushAfterDelay()
+    {
+        yield return new WaitForSeconds(DEFORMATION_DELAY); // 0.2秒待つ
+        
+        if (isCrushed) yield break; // 念のため再チェック
+        
         isCrushed = true;
         
         // モデルの切り替え
@@ -327,7 +346,7 @@ public class IntegratedAluminumCan : MonoBehaviour
             audioSource.PlayOneShot(crushSound);
         }
         
-        Debug.Log($"🥤 アルミ缶がつぶれました！ 最終力: {appliedForce:F2}N, 蓄積力: {accumulatedForce:F2}N");
+        Debug.Log($"🥤 アルミ缶がつぶれました！（0.2秒遅延後）");
     }
     
     /// <summary>

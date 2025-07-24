@@ -848,4 +848,6 @@ private void DiagnoseContactCalculation()
     Debug.Log($"  左グリッパー → 中心: {leftToCenter:F3}m");
     Debug.Log($"  右グリッパー → 中心: {rightToCenter:F3}m");
 }
+
+
 }
