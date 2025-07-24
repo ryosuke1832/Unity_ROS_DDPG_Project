@@ -60,6 +60,28 @@ public class IntegratedAluminumCan : MonoBehaviour
     [Header("デバッグ設定")]
     public bool showDebugInfo = true;
     public bool showForceGizmos = true;
+
+    [Header("つぶれ時のコライダー調整")]
+    public bool enableColliderAdjustment = true;
+    public float colliderShrinkRatio = 0.8f;        // つぶれ時のコライダーサイズ比率
+    public float colliderInwardOffset = 0.01f;      // 内側への押し込み量（メートル）
+    public float adjustmentDuration = 0.3f;         // 調整にかかる時間
+    public AnimationCurve adjustmentCurve = AnimationCurve.EaseInOut(0, 0, 1, 1);
+
+    [Header("デバッグ表示")]
+    public bool showColliderGizmos = true;
+    public Color originalColliderColor = Color.green;
+    public Color crusheddColliderColor = Color.red;
+
+    // 元のコライダー情報
+    private BoxCollider canCollider;
+    private Vector3 originalColliderSize;
+    private Vector3 originalColliderCenter;
+    
+    // 調整状態
+    private bool isAdjusting = false;
+    private bool hasBeenCrushed = false;
+    private Coroutine adjustmentCoroutine;
     
     // 内部状態
     private bool isCrushed = false;
@@ -94,78 +116,90 @@ public class IntegratedAluminumCan : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// 🔍 デバッグ: 現在の設定値をすべて表示
-    /// </summary>
-    [ContextMenu("Debug Show All Values")]
-    public void DebugShowAllValues()
-    {
-        Debug.Log("=== アルミ缶デバッグ情報 ===");
-        Debug.Log($"deformationThreshold: {deformationThreshold:F2}N");
-        Debug.Log($"isCrushed: {isCrushed}");
+    // /// <summary>
+    // /// 🔍 デバッグ: 現在の設定値をすべて表示
+    // /// </summary>
+    // [ContextMenu("Debug Show All Values")]
+    // public void DebugShowAllValues()
+    // {
+    //     Debug.Log("=== アルミ缶デバッグ情報 ===");
+    //     Debug.Log($"deformationThreshold: {deformationThreshold:F2}N");
+    //     Debug.Log($"isCrushed: {isCrushed}");
         
-        var controller = FindObjectOfType<SimpleGripForceController>();
-        if (controller != null)
-        {
-            Debug.Log($"BaseGripForce: {controller.baseGripForce:F2}N");
-            Debug.Log($"比較結果: {controller.baseGripForce:F2}N vs {deformationThreshold:F2}N");
-            Debug.Log($"変形するか?: {(controller.baseGripForce > deformationThreshold ? "はい" : "いいえ")}");
-        }
-        else
-        {
-            Debug.LogError("SimpleGripForceControllerが見つかりません！");
-        }
-        Debug.Log("=========================");
-    }
+    //     var controller = FindObjectOfType<SimpleGripForceController>();
+    //     if (controller != null)
+    //     {
+    //         Debug.Log($"BaseGripForce: {controller.baseGripForce:F2}N");
+    //         Debug.Log($"比較結果: {controller.baseGripForce:F2}N vs {deformationThreshold:F2}N");
+    //         Debug.Log($"変形するか?: {(controller.baseGripForce > deformationThreshold ? "はい" : "いいえ")}");
+    //     }
+    //     else
+    //     {
+    //         Debug.LogError("SimpleGripForceControllerが見つかりません！");
+    //     }
+    //     Debug.Log("=========================");
+    // }
     
     void Start()
     {
-        // 🔍 デバッグ: 初期化開始時の値を記録
-        Debug.Log($"[デバッグ] Start()開始時 deformationThreshold: {deformationThreshold:F2}N");
+        // // 🔍 デバッグ: 初期化開始時の値を記録
+        // Debug.Log($"[デバッグ] Start()開始時 deformationThreshold: {deformationThreshold:F2}N");
         
         InitializeComponents();
         SetupInitialState();
+
+        // BoxColliderを取得して元の値を保存
+        canCollider = GetComponent<BoxCollider>();
+        if (canCollider != null)
+        {
+            originalColliderSize = canCollider.size;
+            originalColliderCenter = canCollider.center;
+        }
+        else
+        {
+            Debug.LogError("BoxColliderが見つかりません！");
+        }
         
-        // 🔍 デバッグ: 初期化完了後の値を確認
-        Debug.Log($"[デバッグ] 初期化完了後 deformationThreshold: {deformationThreshold:F2}N");
+        // // 🔍 デバッグ: 初期化完了後の値を確認
+        // Debug.Log($"[デバッグ] 初期化完了後 deformationThreshold: {deformationThreshold:F2}N");
         
         // 🔍 デバッグ: forceControllerが存在するかチェック
-        var controller = FindObjectOfType<SimpleGripForceController>();
-        if (controller != null)
-        {
-            Debug.Log($"[デバッグ] 発見したSimpleGripForceController.baseGripForce: {controller.baseGripForce:F2}N");
-            Debug.Log($"[デバッグ] 現在の比率: {deformationThreshold / controller.baseGripForce:F3}倍");
+        // var controller = FindObjectOfType<SimpleGripForceController>();
+        // if (controller != null)
+        // {
+        //     Debug.Log($"[デバッグ] 発見したSimpleGripForceController.baseGripForce: {controller.baseGripForce:F2}N");
+        //     Debug.Log($"[デバッグ] 現在の比率: {deformationThreshold / controller.baseGripForce:F3}倍");
             
-            if (Mathf.Abs(deformationThreshold / controller.baseGripForce - 1.5f) < 0.1f)
-            {
-                Debug.LogWarning("⚠️ [デバッグ] deformationThresholdがbaseGripForceの約1.5倍になっています！");
-            }
-        }
+        //     if (Mathf.Abs(deformationThreshold / controller.baseGripForce - 1.5f) < 0.1f)
+        //     {
+        //         Debug.LogWarning("⚠️ [デバッグ] deformationThresholdがbaseGripForceの約1.5倍になっています！");
+        //     }
+        // }
         
-        // 🔍 デバッグ: 他の関連コンポーネントもチェック
-        var gripperInterface = FindObjectOfType<GripperTargetInterface>();
-        if (gripperInterface != null)
-        {
-            Debug.Log($"[デバッグ] GripperTargetInterface発見");
-        }
+        // // 🔍 デバッグ: 他の関連コンポーネントもチェック
+        // var gripperInterface = FindObjectOfType<GripperTargetInterface>();
+        // if (gripperInterface != null)
+        // {
+        //     Debug.Log($"[デバッグ] GripperTargetInterface発見");
+        // }
         
-        var trajectoryPlanner = FindObjectOfType<TrajectoryPlannerDeform>();
-        if (trajectoryPlanner != null)
-        {
-            Debug.Log($"[デバッグ] TrajectoryPlannerDeform発見");
-        }
+        // var trajectoryPlanner = FindObjectOfType<TrajectoryPlannerDeform>();
+        // if (trajectoryPlanner != null)
+        // {
+        //     Debug.Log($"[デバッグ] TrajectoryPlannerDeform発見");
+        // }
     }
     
     void Awake()
     {
         // 🔍 デバッグ: 最初期の値を記録
-        Debug.Log($"[デバッグ] Awake()時 deformationThreshold: {_deformationThreshold:F2}N");
+        // Debug.Log($"[デバッグ] Awake()時 deformationThreshold: {_deformationThreshold:F2}N");
     }
     
     void OnValidate()
     {
         // 🔍 デバッグ: エディタでの値変更を追跡
-        Debug.Log($"[デバッグ] OnValidate()で値変更検出: deformationThreshold={_deformationThreshold:F2}N");
+        // Debug.Log($"[デバッグ] OnValidate()で値変更検出: deformationThreshold={_deformationThreshold:F2}N");
     }
     
     void Update()
@@ -178,6 +212,181 @@ public class IntegratedAluminumCan : MonoBehaviour
             DisplayDebugInfo();
         }
     }
+
+
+    /// <summary>
+    /// つぶれが発生した時に呼び出す（IntegratedAluminumCanのCrushCan()から呼び出し）
+    /// </summary>
+    public void OnCanCrushed()
+
+    {
+        if (!enableColliderAdjustment || hasBeenCrushed || canCollider == null)
+            return;
+
+        hasBeenCrushed = true;
+
+        Debug.Log("🥫 つぶれ検出 - コライダー調整開始");
+
+        // 既存の調整を停止
+        if (adjustmentCoroutine != null)
+        {
+            StopCoroutine(adjustmentCoroutine);
+        }
+
+        // コライダー調整を開始
+        adjustmentCoroutine = StartCoroutine(AdjustColliderOnCrush());
+    }
+/// <summary>
+    /// つぶれ時のコライダー調整コルーチン
+    /// </summary>
+    private IEnumerator AdjustColliderOnCrush()
+    {
+        isAdjusting = true;
+        
+        // 目標サイズと位置を計算
+        Vector3 targetSize = originalColliderSize * colliderShrinkRatio;
+        Vector3 targetCenter = originalColliderCenter;
+        
+        // 内側に押し込む（Y軸方向に調整）
+        targetCenter.y += colliderInwardOffset;
+        
+        // X軸とZ軸も少し内側に
+        targetCenter.x *= 0.9f;
+        targetCenter.z *= 0.9f;
+
+        Debug.Log($"コライダー調整: {originalColliderSize} → {targetSize}");
+        Debug.Log($"中心位置調整: {originalColliderCenter} → {targetCenter}");
+
+        float elapsedTime = 0f;
+        Vector3 startSize = canCollider.size;
+        Vector3 startCenter = canCollider.center;
+
+        while (elapsedTime < adjustmentDuration)
+        {
+            float progress = elapsedTime / adjustmentDuration;
+            float curveValue = adjustmentCurve.Evaluate(progress);
+
+            // サイズを徐々に変更
+            canCollider.size = Vector3.Lerp(startSize, targetSize, curveValue);
+            canCollider.center = Vector3.Lerp(startCenter, targetCenter, curveValue);
+
+            elapsedTime += Time.deltaTime;
+            yield return null;
+        }
+
+        // 最終値を設定
+        canCollider.size = targetSize;
+        canCollider.center = targetCenter;
+
+        isAdjusting = false;
+        Debug.Log("✅ コライダー調整完了");
+    }
+/// <summary>
+    /// 缶をリセットした時にコライダーも元に戻す
+    /// </summary>
+    public void ResetCollider()
+    {
+        if (canCollider == null) return;
+
+        // 調整中の場合は停止
+        if (adjustmentCoroutine != null)
+        {
+            StopCoroutine(adjustmentCoroutine);
+            adjustmentCoroutine = null;
+        }
+
+        // 元の値に戻す
+        canCollider.size = originalColliderSize;
+        canCollider.center = originalColliderCenter;
+        
+        hasBeenCrushed = false;
+        isAdjusting = false;
+
+        Debug.Log("🔄 コライダーを初期状態にリセット");
+    }
+    /// <summary>
+    /// 段階的なつぶれ効果（オプション）
+    /// 力の段階に応じてコライダーを徐々に調整
+    /// </summary>
+    public void AdjustColliderByForce(float forceRatio)
+    {
+        if (!enableColliderAdjustment || canCollider == null || hasBeenCrushed)
+            return;
+
+        // 力の比率（0-1）に基づいてコライダーを調整
+        float sizeRatio = Mathf.Lerp(1f, colliderShrinkRatio, forceRatio);
+        Vector3 adjustedSize = originalColliderSize * sizeRatio;
+        
+        // 中心位置も微調整
+        Vector3 adjustedCenter = originalColliderCenter;
+        adjustedCenter.y += colliderInwardOffset * forceRatio * 0.5f;
+
+        canCollider.size = adjustedSize;
+        canCollider.center = adjustedCenter;
+    }
+    /// <summary>
+    /// グリッパーが近づいた時の事前調整（オプション）
+    /// </summary>
+    public void OnGripperApproaching(Vector3 leftGripperPos, Vector3 rightGripperPos)
+    {
+        if (!enableColliderAdjustment || hasBeenCrushed) return;
+
+        // グリッパーの方向に基づいてコライダーを微調整
+        Vector3 gripDirection = (rightGripperPos - leftGripperPos).normalized;
+        Vector3 canPosition = transform.position;
+        
+        // グリッパーからの圧力方向を予測してコライダーを事前調整
+        float proximityFactor = Mathf.Clamp01(1f / Vector3.Distance(leftGripperPos, canPosition));
+        
+        if (proximityFactor > 0.7f) // グリッパーが十分近い場合
+        {
+            AdjustColliderByForce(proximityFactor * 0.3f); // 軽微な事前調整
+        }
+    }
+    void OnDrawGizmos()
+    {
+        if (!showColliderGizmos || canCollider == null) return;
+
+        // 現在のコライダーを表示
+        Gizmos.color = hasBeenCrushed ? crusheddColliderColor : originalColliderColor;
+        Gizmos.matrix = transform.localToWorldMatrix;
+        Gizmos.DrawWireCube(canCollider.center, canCollider.size);
+
+        // 元のサイズも薄く表示（つぶれた後）
+        if (hasBeenCrushed)
+        {
+            Gizmos.color = new Color(originalColliderColor.r, originalColliderColor.g, originalColliderColor.b, 0.3f);
+            Gizmos.DrawWireCube(originalColliderCenter, originalColliderSize);
+        }
+
+        // 調整中は特別な色で表示
+        if (isAdjusting)
+        {
+            Gizmos.color = Color.yellow;
+            Gizmos.DrawWireCube(canCollider.center, canCollider.size);
+        }
+    }
+        void OnGUI()
+    {
+        if (!showColliderGizmos) return;
+
+        GUIStyle style = new GUIStyle();
+        style.fontSize = 12;
+        style.normal.textColor = Color.white;
+
+        GUI.Label(new Rect(10, 110, 300, 20), $"コライダー状態: {(hasBeenCrushed ? "調整済み" : "元のサイズ")}", style);
+        GUI.Label(new Rect(10, 130, 300, 20), $"調整中: {(isAdjusting ? "Yes" : "No")}", style);
+        
+        if (canCollider != null)
+        {
+            GUI.Label(new Rect(10, 150, 300, 20), $"現在サイズ: {canCollider.size.ToString("F2")}", style);
+            GUI.Label(new Rect(10, 170, 300, 20), $"元サイズ: {originalColliderSize.ToString("F2")}", style);
+        }
+    }
+
+
+
+
     
     /// <summary>
     /// 初期化処理
@@ -345,6 +554,7 @@ public class IntegratedAluminumCan : MonoBehaviour
         {
             audioSource.PlayOneShot(crushSound);
         }
+        OnCanCrushed(); // つぶれ時のコライダー調整を呼び出す
         
         Debug.Log($"🥤 アルミ缶がつぶれました！（0.2秒遅延後）");
     }
@@ -400,6 +610,7 @@ public class IntegratedAluminumCan : MonoBehaviour
             canRigidbody.drag = 0.1f;
             canRigidbody.angularDrag = 0.05f;
         }
+        ResetCollider(); // コライダーも元に戻す
         
         Debug.Log("🔄 アルミ缶を初期状態にリセットしました");
     }
@@ -416,62 +627,64 @@ public class IntegratedAluminumCan : MonoBehaviour
     
 
     
-    /// <summary>
-    /// Gizmoの描画（エディタ用）
-    /// </summary>
-    void OnDrawGizmos()
-    {
-        if (!showForceGizmos) return;
+    // /// <summary>
+    // /// Gizmoの描画（エディタ用）
+    // /// </summary>
+    // void OnDrawGizmos()
+    // {
+    //     if (!showForceGizmos) return;
         
-        // 衝突点の可視化
-        if (lastContactPoint != Vector3.zero)
-        {
-            Gizmos.color = isCrushed ? Color.red : Color.yellow;
-            Gizmos.DrawWireSphere(lastContactPoint, 0.02f);
-        }
+    //     // 衝突点の可視化
+    //     if (lastContactPoint != Vector3.zero)
+    //     {
+    //         Gizmos.color = isCrushed ? Color.red : Color.yellow;
+    //         Gizmos.DrawWireSphere(lastContactPoint, 0.02f);
+    //     }
         
-        // 力の可視化
-        if (appliedForce > 0f)
-        {
-            Gizmos.color = accumulatedForce >= deformationThreshold ? Color.red : Color.green;
-            Gizmos.DrawRay(transform.position, lastContactNormal * (appliedForce * 0.01f));
-        }
+    //     // 力の可視化
+    //     if (appliedForce > 0f)
+    //     {
+    //         Gizmos.color = accumulatedForce >= deformationThreshold ? Color.red : Color.green;
+    //         Gizmos.DrawRay(transform.position, lastContactNormal * (appliedForce * 0.01f));
+    //     }
         
-        // 蓄積力のバー表示
-        float barHeight = (accumulatedForce / deformationThreshold) * 0.1f;
-        Gizmos.color = Color.blue;
-        Gizmos.DrawCube(transform.position + Vector3.up * 0.15f, new Vector3(0.02f, barHeight, 0.02f));
-    }
-/// <summary>
-/// インスペクター上での情報表示
-/// </summary>
-void OnGUI()
-{
-    if (!showDebugInfo) return;
+    //     // 蓄積力のバー表示
+    //     float barHeight = (accumulatedForce / deformationThreshold) * 0.1f;
+    //     Gizmos.color = Color.blue;
+    //     Gizmos.DrawCube(transform.position + Vector3.up * 0.15f, new Vector3(0.02f, barHeight, 0.02f));
+    // }
+// /// <summary>
+// /// インスペクター上での情報表示
+// /// </summary>
+// void OnGUI()
+// {
+//     if (!showDebugInfo) return;
     
-    GUIStyle style = new GUIStyle();
-    style.fontSize = 14;
-    style.normal.textColor = Color.white;
+//     GUIStyle style = new GUIStyle();
+//     style.fontSize = 14;
+//     style.normal.textColor = Color.white;
     
-    var gripController = FindObjectOfType<SimpleGripForceController>();
-    if (gripController != null)
-    {
-        GUI.Label(new Rect(10, 10, 300, 20), $"缶の状態: {(isCrushed ? "つぶれた" : "正常")}", style);
-        GUI.Label(new Rect(10, 30, 300, 20), $"BaseGripForce: {gripController.baseGripForce:F2}N", style);
-        GUI.Label(new Rect(10, 50, 300, 20), $"変形閾値: {deformationThreshold:F2}N", style);
-        GUI.Label(new Rect(10, 70, 300, 20), $"変形判定: {(gripController.baseGripForce > deformationThreshold ? "変形" : "正常")}", style);
+//     var gripController = FindObjectOfType<SimpleGripForceController>();
+//     if (gripController != null)
+//     {
+//         GUI.Label(new Rect(10, 10, 300, 20), $"缶の状態: {(isCrushed ? "つぶれた" : "正常")}", style);
+//         GUI.Label(new Rect(10, 30, 300, 20), $"BaseGripForce: {gripController.baseGripForce:F2}N", style);
+//         GUI.Label(new Rect(10, 50, 300, 20), $"変形閾値: {deformationThreshold:F2}N", style);
+//         GUI.Label(new Rect(10, 70, 300, 20), $"変形判定: {(gripController.baseGripForce > deformationThreshold ? "変形" : "正常")}", style);
         
-        // 進行状況バー
-        float progress = gripController.baseGripForce / deformationThreshold;
-        GUI.Box(new Rect(10, 90, 200, 20), "");
-        GUI.Box(new Rect(10, 90, 200 * Mathf.Clamp01(progress), 20), "");
-        GUI.Label(new Rect(10, 90, 200, 20), $"力の比率: {(progress * 100):F1}%", style);
-    }
-    else
-    {
-        GUI.Label(new Rect(10, 10, 300, 20), "SimpleGripForceController not found!", style);
-    }
-}
+//         // 進行状況バー
+//         float progress = gripController.baseGripForce / deformationThreshold;
+//         GUI.Box(new Rect(10, 90, 200, 20), "");
+//         GUI.Box(new Rect(10, 90, 200 * Mathf.Clamp01(progress), 20), "");
+//         GUI.Label(new Rect(10, 90, 200, 20), $"力の比率: {(progress * 100):F1}%", style);
+//     }
+//     else
+//     {
+//         GUI.Label(new Rect(10, 10, 300, 20), "SimpleGripForceController not found!", style);
+//     }
+// }
+
+
 }
 
 public enum MaterialType
