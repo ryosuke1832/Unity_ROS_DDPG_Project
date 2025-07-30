@@ -3,7 +3,7 @@ using System.Collections;
 
 /// <summary>
 /// 統合されたアルミ缶変形システム（コライダーサイズ変更版）
-/// 力が不足している場合にコライダーを小さくして掴みにくくする
+/// 力が不足している場合にコライダーを小さくして掴みにくくする + 滑りやすくする
 /// </summary>
 public class IntegratedAluminumCan : MonoBehaviour
 {
@@ -33,6 +33,16 @@ public class IntegratedAluminumCan : MonoBehaviour
     [Range(0.1f, 2f)]
     [Tooltip("コライダーサイズ変更の遅延時間")]
     public float colliderChangeDelay = 0.3f;
+    
+    [Header("摩擦制御設定")]
+    [Tooltip("通常時の摩擦材質")]
+    public PhysicMaterial normalFriction;
+    
+    [Tooltip("滑りやすい摩擦材質")]
+    public PhysicMaterial slipperyFriction;
+    
+    [Tooltip("力不足時に滑りやすくするか")]
+    public bool enableSlipperyWhenWeak = true;
     
     public bool enableColliderSystem = true;
     public bool showColliderDebug = true;
@@ -83,6 +93,7 @@ public class IntegratedAluminumCan : MonoBehaviour
     private Vector3 originalColliderSize;
     private Vector3 originalColliderCenter; // 元のセンター位置も保存
     private bool isColliderSmall = false;
+    private bool isSlippery = false; // 滑りやすい状態かどうか
     private float lastForceCheckTime = 0f;
     private Coroutine colliderChangeCoroutine;
     
@@ -115,6 +126,7 @@ public class IntegratedAluminumCan : MonoBehaviour
         InitializeComponents();
         SetupInitialState();
         InitializeColliderSystem(); // 新機能
+        CreatePhysicMaterials(); // 摩擦材質を作成
     }
     
     void OnValidate()
@@ -137,6 +149,39 @@ public class IntegratedAluminumCan : MonoBehaviour
         {
             DisplayDebugInfo();
         }
+    }
+    
+    /// <summary>
+    /// 新機能：物理材質を作成
+    /// </summary>
+    private void CreatePhysicMaterials()
+    {
+        // 通常の摩擦材質（まだ設定されていない場合）
+        if (normalFriction == null)
+        {
+            normalFriction = new PhysicMaterial("NormalGrip");
+            normalFriction.dynamicFriction = 0.6f;   // 通常の摩擦
+            normalFriction.staticFriction = 0.8f;    // 静止摩擦
+            normalFriction.bounciness = 0.1f;
+            normalFriction.frictionCombine = PhysicMaterialCombine.Average;
+            normalFriction.bounceCombine = PhysicMaterialCombine.Average;
+        }
+        
+        // 滑りやすい材質（まだ設定されていない場合）
+        if (slipperyFriction == null)
+        {
+            slipperyFriction = new PhysicMaterial("SlipperyGrip");
+            slipperyFriction.dynamicFriction = 0.05f;  // 非常に滑りやすい
+            slipperyFriction.staticFriction = 0.1f;    // 静止摩擦も低い
+            slipperyFriction.bounciness = 0.2f;
+            slipperyFriction.frictionCombine = PhysicMaterialCombine.Minimum; // 最小値を使用
+            slipperyFriction.bounceCombine = PhysicMaterialCombine.Average;
+        }
+        
+        // 初期状態では通常の摩擦を適用
+        ApplyNormalFriction();
+        
+        Debug.Log("物理材質を作成しました");
     }
     
     /// <summary>
@@ -201,9 +246,23 @@ public class IntegratedAluminumCan : MonoBehaviour
             RestoreColliderSize();
         }
         
+        // 摩擦も同時に更新
+        if (enableSlipperyWhenWeak)
+        {
+            if (shouldBeShrunk && !isSlippery)
+            {
+                ApplySlipperyFriction();
+            }
+            else if (!shouldBeShrunk && isSlippery)
+            {
+                ApplyNormalFriction();
+            }
+        }
+        
         if (showColliderDebug && Time.frameCount % 60 == 0) // 1秒ごと
         {
-            Debug.Log($"🔍 コライダー判定: 力={currentGripForce:F2}N, 閾値={minimumGripForce:F2}N, 小さい={isColliderSmall}");
+            string frictionStatus = isSlippery ? " + 滑りやすい" : "";
+            Debug.Log($"🔍 コライダー判定: 力={currentGripForce:F2}N, 閾値={minimumGripForce:F2}N, 小さい={isColliderSmall}{frictionStatus}");
         }
     }
     
@@ -250,7 +309,8 @@ public class IntegratedAluminumCan : MonoBehaviour
         
         if (showColliderDebug)
         {
-            Debug.Log("⚠️ 把持力不足：アルミ缶が掴みにくくなりました（高さは維持）");
+            string frictionStatus = enableSlipperyWhenWeak ? " + 滑りやすく" : "";
+            Debug.Log($"⚠️ 把持力不足：アルミ缶が掴みにくくなりました（高さは維持{frictionStatus}）");
         }
     }
     
@@ -269,7 +329,55 @@ public class IntegratedAluminumCan : MonoBehaviour
         
         if (showColliderDebug)
         {
-            Debug.Log("✅ 把持力十分：アルミ缶が掴みやすくなりました");
+            Debug.Log("✅ 把持力十分：アルミ缶が掴みやすくなりました（摩擦も正常）");
+        }
+    }
+    
+    /// <summary>
+    /// 新機能：通常の摩擦を適用
+    /// </summary>
+    private void ApplyNormalFriction()
+    {
+        isSlippery = false;
+        
+        if (canBoxCollider != null)
+        {
+            canBoxCollider.material = normalFriction;
+        }
+        
+        // Rigidbodyの物理特性も調整
+        if (canRigidbody != null)
+        {
+            canRigidbody.drag = 0.1f; // 通常の空気抵抗
+        }
+        
+        if (showColliderDebug)
+        {
+            Debug.Log("✅ 通常の摩擦を適用：掴みやすい状態");
+        }
+    }
+    
+    /// <summary>
+    /// 新機能：滑りやすい摩擦を適用
+    /// </summary>
+    private void ApplySlipperyFriction()
+    {
+        isSlippery = true;
+        
+        if (canBoxCollider != null)
+        {
+            canBoxCollider.material = slipperyFriction;
+        }
+        
+        // Rigidbodyの物理特性も調整
+        if (canRigidbody != null)
+        {
+            canRigidbody.drag = 0.05f; // 空気抵抗を減らして滑りやすく
+        }
+        
+        if (showColliderDebug)
+        {
+            Debug.Log("⚠️ 滑りやすい摩擦を適用：物体が滑りやすくなりました");
         }
     }
     
@@ -426,6 +534,9 @@ public class IntegratedAluminumCan : MonoBehaviour
         // コライダーサイズもリセット
         RestoreColliderSize();
         
+        // 摩擦も通常に戻す
+        ApplyNormalFriction();
+        
         if (canRigidbody != null)
         {
             canRigidbody.mass = canMass;
@@ -468,6 +579,22 @@ public class IntegratedAluminumCan : MonoBehaviour
     }
     
     /// <summary>
+    /// 新機能：摩擦状態の手動テスト
+    /// </summary>
+    [ContextMenu("Test Friction")]
+    public void TestFriction()
+    {
+        if (isSlippery)
+        {
+            ApplyNormalFriction();
+        }
+        else
+        {
+            ApplySlipperyFriction();
+        }
+    }
+    
+    /// <summary>
     /// 新機能：現在のコライダー状況確認
     /// </summary>
     [ContextMenu("Check Collider System")]
@@ -477,15 +604,18 @@ public class IntegratedAluminumCan : MonoBehaviour
         if (gripController != null)
         {
             float currentForce = gripController.GetCurrentTargetForce();
-            Debug.Log("=== コライダーサイズシステム状況 ===");
+            Debug.Log("=== コライダー&摩擦システム状況 ===");
             Debug.Log($"現在の把持力: {currentForce:F2}N");
             Debug.Log($"最小把持力閾値: {minimumGripForce:F2}N");
             Debug.Log($"コライダー縮小状態: {isColliderSmall}");
+            Debug.Log($"滑りやすい状態: {isSlippery}");
             Debug.Log($"元のサイズ: {originalColliderSize}");
             Debug.Log($"元のセンター: {originalColliderCenter}");
             Debug.Log($"現在のサイズ: {(canBoxCollider != null ? canBoxCollider.size.ToString() : "なし")}");
             Debug.Log($"現在のセンター: {(canBoxCollider != null ? canBoxCollider.center.ToString() : "なし")}");
+            Debug.Log($"現在の材質: {(canBoxCollider != null ? canBoxCollider.material?.name : "なし")}");
             Debug.Log($"縮小倍率: {weakGripColliderScale}");
+            Debug.Log($"摩擦制御有効: {enableSlipperyWhenWeak}");
             Debug.Log($"システム有効: {enableColliderSystem}");
         }
         else
@@ -518,14 +648,15 @@ public class IntegratedAluminumCan : MonoBehaviour
         // 新機能：コライダーサイズの視覚表示
         if (canBoxCollider != null)
         {
-            Gizmos.color = isColliderSmall ? Color.red : Color.green;
-            Gizmos.DrawWireCube(transform.position, canBoxCollider.size);
+            // 滑りやすい状態なら黄色、そうでなければ通常の色
+            Gizmos.color = isSlippery ? Color.yellow : (isColliderSmall ? Color.red : Color.green);
+            Gizmos.DrawWireCube(transform.position + originalColliderCenter, canBoxCollider.size);
             
             // 元のサイズも薄く表示
             if (isColliderSmall)
             {
                 Gizmos.color = new Color(0, 1, 0, 0.3f); // 薄い緑
-                Gizmos.DrawWireCube(transform.position, originalColliderSize);
+                Gizmos.DrawWireCube(transform.position + originalColliderCenter, originalColliderSize);
             }
         }
     }
@@ -546,8 +677,10 @@ public class IntegratedAluminumCan : MonoBehaviour
             GUI.Label(new Rect(10, 50, 300, 20), $"変形閾値: {deformationThreshold:F2}N", style);
             GUI.Label(new Rect(10, 70, 300, 20), $"変形判定: {(gripController.baseGripForce > deformationThreshold ? "変形" : "正常")}", style);
             
-            // 新機能：コライダー状態の表示
-            GUI.Label(new Rect(10, 90, 300, 20), $"コライダー: {(isColliderSmall ? "小さい" : "通常")}", style);
+            // 新機能：コライダー&摩擦状態の表示
+            string colliderState = isColliderSmall ? "小さい" : "通常";
+            string frictionState = isSlippery ? " + 滑りやすい" : "";
+            GUI.Label(new Rect(10, 90, 350, 20), $"コライダー: {colliderState}{frictionState}", style);
             GUI.Label(new Rect(10, 110, 300, 20), $"最小把持力: {minimumGripForce:F2}N", style);
             
             if (canBoxCollider != null)
