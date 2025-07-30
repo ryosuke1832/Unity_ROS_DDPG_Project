@@ -78,17 +78,17 @@ public class GripperTargetInterface : MonoBehaviour
             
             if (enableDetailedLogging)
             {
-                Debug.Log($"[状態チェック] グリッパー閉じ: {isGripperClosed}, " +
-                        $"有効接触: {HasValidContact()}, " +
-                        $"力伝達可能: {canTransferForce}, " +
-                        $"現在力: {currentForce:F2}N");
+                // Debug.Log($"[状態チェック] グリッパー閉じ: {isGripperClosed}, " +
+                //         $"有効接触: {HasValidContact()}, " +
+                //         $"力伝達可能: {canTransferForce}, " +
+                //         $"現在力: {currentForce:F2}N");
             }
             
             if (!canTransferForce)
             {
                 if (!hasLoggedForceTransfer)
                 {
-                    Debug.LogWarning($"❌ 力伝達不可 - グリッパー閉じ: {isGripperClosed}, 接触: {HasValidContact()}");
+                    // Debug.LogWarning($"❌ 力伝達不可 - グリッパー閉じ: {isGripperClosed}, 接触: {HasValidContact()}");
                 }
                 return;
             }
@@ -99,7 +99,7 @@ public class GripperTargetInterface : MonoBehaviour
             
             if (enableDetailedLogging)
             {
-                Debug.Log($"✅ 力伝達実行: {currentForce:F2}N → 接触点: {contactPoint}");
+                // Debug.Log($"✅ 力伝達実行: {currentForce:F2}N → 接触点: {contactPoint}");
             }
         }
     
@@ -213,7 +213,7 @@ public class GripperTargetInterface : MonoBehaviour
         }
         
         // 距離ベースの接触検出を使用（SimpleContactDetectorは使わない）
-        Debug.Log($"Setup gripper collider for {(isLeft ? "left" : "right")} gripper: {gripperObj.name}");
+        // Debug.Log($"Setup gripper collider for {(isLeft ? "left" : "right")} gripper: {gripperObj.name}");
     }
     
     // // UpdateGripperState() メソッドに追加
@@ -307,8 +307,8 @@ public class GripperTargetInterface : MonoBehaviour
             
             if (enableDetailedLogging)
             {
-                Debug.Log($"📍 接触検出: {transform.name} → {other.name} " +
-                        $"at {(transform.name.Contains("left") ? leftContactPoint : rightContactPoint)}");
+                // Debug.Log($"📍 接触検出: {transform.name} → {other.name} " +
+                //         $"at {(transform.name.Contains("left") ? leftContactPoint : rightContactPoint)}");
             }
         }
     }
@@ -343,13 +343,13 @@ private void UpdateDistanceBasedContact()
     // 詳細ログ（デバッグ用）
     if (enableDetailedLogging)
     {
-        Debug.Log($"🔍 正しい接触検出:");
-        Debug.Log($"  缶半径: {canRadius:F3}m, 接触閾値: {contactThreshold:F3}m");
-        Debug.Log($"  左グリッパー → 缶中心: {leftDistanceToCenter:F3}m");
-        Debug.Log($"  左グリッパー → 缶表面: {leftDistanceToSurface:F3}m → 接触: {leftGripperInContact}");
-        Debug.Log($"  右グリッパー → 缶中心: {rightDistanceToCenter:F3}m");
-        Debug.Log($"  右グリッパー → 缶表面: {rightDistanceToSurface:F3}m → 接触: {rightGripperInContact}");
-        Debug.Log($"  有効接触: {HasValidContact()}");
+        // Debug.Log($"🔍 正しい接触検出:");
+        // Debug.Log($"  缶半径: {canRadius:F3}m, 接触閾値: {contactThreshold:F3}m");
+        // Debug.Log($"  左グリッパー → 缶中心: {leftDistanceToCenter:F3}m");
+        // Debug.Log($"  左グリッパー → 缶表面: {leftDistanceToSurface:F3}m → 接触: {leftGripperInContact}");
+        // Debug.Log($"  右グリッパー → 缶中心: {rightDistanceToCenter:F3}m");
+        // Debug.Log($"  右グリッパー → 缶表面: {rightDistanceToSurface:F3}m → 接触: {rightGripperInContact}");
+        // Debug.Log($"  有効接触: {HasValidContact()}");
     }
     
     // 接触点と法線の更新
@@ -370,12 +370,12 @@ private void UpdateDistanceBasedContact()
     // 接触状態の変化をログ
     if (leftGripperInContact != wasLeftInContact)
     {
-        Debug.Log($"🔄 左グリッパー接触変化: {leftGripperInContact} (表面距離: {leftDistanceToSurface:F3}m)");
+        // Debug.Log($"🔄 左グリッパー接触変化: {leftGripperInContact} (表面距離: {leftDistanceToSurface:F3}m)");
     }
     
     if (rightGripperInContact != wasRightInContact)
     {
-        Debug.Log($"🔄 右グリッパー接触変化: {rightGripperInContact} (表面距離: {rightDistanceToSurface:F3}m)");
+        // Debug.Log($"🔄 右グリッパー接触変化: {rightGripperInContact} (表面距離: {rightDistanceToSurface:F3}m)");
     }
 }
 
@@ -405,11 +405,11 @@ private void UpdateAdvancedContactDetection()
     // 詳細ログ
     if (enableDetailedLogging)
     {
-        Debug.Log($"🎯 高精度接触検出:");
-        Debug.Log($"  左最近点: {leftClosestPoint}");
-        Debug.Log($"  左表面距離: {leftDistanceToSurface:F3}m → 接触: {leftGripperInContact}");
-        Debug.Log($"  右最近点: {rightClosestPoint}");
-        Debug.Log($"  右表面距離: {rightDistanceToSurface:F3}m → 接触: {rightGripperInContact}");
+        // Debug.Log($"🎯 高精度接触検出:");
+        // Debug.Log($"  左最近点: {leftClosestPoint}");
+        // Debug.Log($"  左表面距離: {leftDistanceToSurface:F3}m → 接触: {leftGripperInContact}");
+        // Debug.Log($"  右最近点: {rightClosestPoint}");
+        // Debug.Log($"  右表面距離: {rightDistanceToSurface:F3}m → 接触: {rightGripperInContact}");
     }
     
     // 接触点と法線の更新

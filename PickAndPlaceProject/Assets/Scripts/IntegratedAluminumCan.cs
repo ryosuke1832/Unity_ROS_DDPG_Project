@@ -366,23 +366,23 @@ public class IntegratedAluminumCan : MonoBehaviour
             Gizmos.DrawWireCube(canCollider.center, canCollider.size);
         }
     }
-        void OnGUI()
-    {
-        if (!showColliderGizmos) return;
+    //     void OnGUI()
+    // {
+    //     if (!showColliderGizmos) return;
 
-        GUIStyle style = new GUIStyle();
-        style.fontSize = 12;
-        style.normal.textColor = Color.white;
+    //     GUIStyle style = new GUIStyle();
+    //     style.fontSize = 12;
+    //     style.normal.textColor = Color.white;
 
-        GUI.Label(new Rect(10, 110, 300, 20), $"コライダー状態: {(hasBeenCrushed ? "調整済み" : "元のサイズ")}", style);
-        GUI.Label(new Rect(10, 130, 300, 20), $"調整中: {(isAdjusting ? "Yes" : "No")}", style);
+    //     GUI.Label(new Rect(10, 110, 300, 20), $"コライダー状態: {(hasBeenCrushed ? "調整済み" : "元のサイズ")}", style);
+    //     GUI.Label(new Rect(10, 130, 300, 20), $"調整中: {(isAdjusting ? "Yes" : "No")}", style);
         
-        if (canCollider != null)
-        {
-            GUI.Label(new Rect(10, 150, 300, 20), $"現在サイズ: {canCollider.size.ToString("F2")}", style);
-            GUI.Label(new Rect(10, 170, 300, 20), $"元サイズ: {originalColliderSize.ToString("F2")}", style);
-        }
-    }
+    //     if (canCollider != null)
+    //     {
+    //         GUI.Label(new Rect(10, 150, 300, 20), $"現在サイズ: {canCollider.size.ToString("F2")}", style);
+    //         GUI.Label(new Rect(10, 170, 300, 20), $"元サイズ: {originalColliderSize.ToString("F2")}", style);
+    //     }
+    // }
 
 
 
@@ -567,7 +567,7 @@ public class IntegratedAluminumCan : MonoBehaviour
         if (Time.frameCount % 60 == 0) // 1秒ごと
         {
             string status = isCrushed ? "つぶれた" : "正常";
-            Debug.Log($"缶の状態: {status}, 現在の力: {appliedForce:F2}N, 蓄積力: {accumulatedForce:F2}N");
+            // Debug.Log($"缶の状態: {status}, 現在の力: {appliedForce:F2}N, 蓄積力: {accumulatedForce:F2}N");
         }
     }
     

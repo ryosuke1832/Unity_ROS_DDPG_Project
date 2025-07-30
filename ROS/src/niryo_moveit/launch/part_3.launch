@@ -6,6 +6,12 @@
 		<param name="tcp_ip" type="string" value="$(arg tcp_ip)"/>
         <param name="tcp_port" type="int" value="$(arg tcp_port)"/>
 	</node>
+        <!-- Joint State Publisher（GUI無し版を明示的に起動） -->
+    <node name="joint_state_publisher" pkg="joint_state_publisher" type="joint_state_publisher" output="screen">
+        <param name="use_gui" value="false"/>
+    </node>
+
+    
     <node name="mover" pkg="niryo_moveit" type="mover.py" args="--wait" output="screen"/>
     <include file="$(find niryo_moveit)/launch/demo.launch" />
 </launch>

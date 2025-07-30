@@ -6,6 +6,11 @@
         <arg name="simulation_mode" value="true" />
     </include>
 
+        <!-- Joint State Publisher（GUI無し版を明示的に起動） -->
+    <node name="joint_state_publisher" pkg="joint_state_publisher" type="joint_state_publisher" output="screen">
+        <param name="use_gui" value="false"/>
+    </node>
+
     <!-- Moveit move_group -->
     <include file="$(find niryo_moveit)/launch/move_group.launch" />
 

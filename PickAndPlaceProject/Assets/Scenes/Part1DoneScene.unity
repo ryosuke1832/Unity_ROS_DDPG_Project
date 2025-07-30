@@ -3059,7 +3059,7 @@ RectTransform:
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0.5, y: 0.5}
   m_AnchorMax: {x: 0.5, y: 0.5}
-  m_AnchoredPosition: {x: 200, y: 200}
+  m_AnchoredPosition: {x: 250, y: 200}
   m_SizeDelta: {x: 160, y: 30}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &818336527
@@ -6090,10 +6090,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: dffa243396da20e4a8636701ed00878a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  baseGripForce: 19.7
-  forceVariability: 0.1
+  baseGripForce: 5.9
+  forceVariability: 0.5
   forceChangeRate: 0.12
-  showDebugInfo: 1
+  showDebugInfo: 0
 --- !u!4 &1124406059
 Transform:
   m_ObjectHideFlags: 0
@@ -7392,8 +7392,8 @@ MonoBehaviour:
   gripperCloseThreshold: 0.008
   contactForceThreshold: 0.5
   requireBothGrippersContact: 1
-  showContactGizmos: 1
-  enableDetailedLogging: 1
+  showContactGizmos: 0
+  enableDetailedLogging: 0
 --- !u!4 &1279036588
 Transform:
   m_ObjectHideFlags: 0
