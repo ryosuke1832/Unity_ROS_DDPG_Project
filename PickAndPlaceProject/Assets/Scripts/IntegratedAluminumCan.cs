@@ -136,8 +136,6 @@ public class IntegratedAluminumCan : MonoBehaviour
     
     void Update()
     {
-        UpdateForceDecay();
-        CheckForceThreshold();
         
         // 新機能：コライダーサイズ変更システムの更新
         if (enableColliderSystem)
@@ -430,45 +428,63 @@ public class IntegratedAluminumCan : MonoBehaviour
         Debug.Log($"[デバッグ] SetupInitialState完了時 deformationThreshold: {deformationThreshold:F2}N");
     }
     
-    public void ApplyGripperForceWithDirection(float force, Vector3 contactPoint, Vector3 contactNormal)
-    {
-        appliedForce = force;
-        lastContactPoint = contactPoint;
-        lastContactNormal = contactNormal.normalized;
-        
-        if (isCrushed) return;
-        
-        accumulatedForce += force * Time.deltaTime * deformationSpeed;
-        
-        if (showDebugInfo && Time.frameCount % 30 == 0)
+        public void ApplyGripperForceWithDirection(float force, Vector3 contactPoint, Vector3 contactNormal)
         {
-            Debug.Log($"力適用: {force:F2}N, 蓄積: {accumulatedForce:F2}N, 接触点: {contactPoint}");
+            if (isCrushed) return;
+            
+            appliedForce = force;
+            lastContactPoint = contactPoint;
+            lastContactNormal = contactNormal;
+            
+            // 蓄積力システムを使わず、現在の把持力で直接判定
+            if (appliedForce > deformationThreshold)
+            {
+                if (!isCrushed)
+                {
+                    // 遅延なしで即座につぶす
+                    isCrushed = true;
+                    
+                    // モデルの切り替え
+                    if (normalCanModel != null)
+                        normalCanModel.SetActive(false);
+                        
+                    if (crushedCanModel != null)
+                        crushedCanModel.SetActive(true);
+                    
+                    // 音響効果
+                    if (audioSource != null && crushSound != null)
+                    {
+                        audioSource.PlayOneShot(crushSound);
+                    }
+                    
+                    Debug.Log($"🥤 アルミ缶がつぶれました！ 把持力: {appliedForce:F2}N > 閾値: {deformationThreshold:F2}N");
+                }
+            }
         }
-    }
     
     public void ApplyGripperForce(float force, Vector3 contactPoint)
     {
         ApplyGripperForceWithDirection(force, contactPoint, Vector3.up);
     }
     
-    void UpdateForceDecay()
-    {
-        if (appliedForce <= 0f && accumulatedForce > 0f)
-        {
-            accumulatedForce -= Time.deltaTime * deformationSpeed * 0.5f;
-            accumulatedForce = Mathf.Max(0f, accumulatedForce);
-        }
-    }
+    // void UpdateForceDecay()
+    // {
+    //     if (appliedForce <= 0f && accumulatedForce > 0f)
+    //     {
+    //         accumulatedForce -= Time.deltaTime * deformationSpeed * 0.5f;
+    //         accumulatedForce = Mathf.Max(0f, accumulatedForce);
+    //     }
+    // }
     
-    void CheckForceThreshold()
-    {
-        if (isCrushed) return;
+    // void CheckForceThreshold()
+    // {
+    //     if (isCrushed) return;
         
-        if (accumulatedForce >= deformationThreshold)
-        {
-            CrushCan();
-        }
-    }
+    //     if (accumulatedForce >= deformationThreshold)
+    //     {
+    //         CrushCan();
+    //     }
+    // }
     
     void CrushCan()
     {

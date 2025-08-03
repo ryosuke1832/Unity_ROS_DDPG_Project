@@ -6,7 +6,8 @@
         "Unity.Robotics.ROSTCPConnector",
         "Unity.Robotics.UrdfImporter",
         "Unity.Robotics.ROSTCPConnector.MessageGeneration",
-        "Unity.Robotics.ROSTCPConnector.Messages"
+        "Unity.Robotics.ROSTCPConnector.Messages",
+        "LSL4Unity"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
