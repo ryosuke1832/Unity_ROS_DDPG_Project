@@ -2238,43 +2238,20 @@ MonoBehaviour:
   normalCanModel: {fileID: 806208462}
   crushedCanModel: {fileID: 676011064}
   _deformationThreshold: 15
+  minimumGripForce: 5
+  weakGripColliderScale: 0.4
+  colliderChangeDelay: 0.3
+  normalFriction: {fileID: 0}
+  slipperyFriction: {fileID: 0}
+  enableSlipperyWhenWeak: 1
+  enableColliderSystem: 1
+  showColliderDebug: 1
   deformationSpeed: 0.216
   crushSound: {fileID: 0}
   audioSource: {fileID: 0}
   canMass: 0.015
   showDebugInfo: 1
   showForceGizmos: 1
-  enableColliderAdjustment: 1
-  colliderShrinkRatio: 0.8
-  colliderInwardOffset: 0.01
-  adjustmentDuration: 0.3
-  adjustmentCurve:
-    serializedVersion: 2
-    m_Curve:
-    - serializedVersion: 3
-      time: 0
-      value: 0
-      inSlope: 0
-      outSlope: 0
-      tangentMode: 0
-      weightedMode: 0
-      inWeight: 0
-      outWeight: 0
-    - serializedVersion: 3
-      time: 1
-      value: 1
-      inSlope: 0
-      outSlope: 0
-      tangentMode: 0
-      weightedMode: 0
-      inWeight: 0
-      outWeight: 0
-    m_PreInfinity: 2
-    m_PostInfinity: 2
-    m_RotationOrder: 4
-  showColliderGizmos: 1
-  originalColliderColor: {r: 0, g: 1, b: 0, a: 1}
-  crusheddColliderColor: {r: 1, g: 0, b: 0, a: 1}
 --- !u!54 &622264443
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -6017,6 +5994,49 @@ Transform:
   m_CorrespondingSourceObject: {fileID: 8214453809557477258, guid: 5eecd5da92eb64eb6876d43ca0009083, type: 3}
   m_PrefabInstance: {fileID: 1422978638}
   m_PrefabAsset: {fileID: 0}
+--- !u!1 &1073040506
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1073040508}
+  - component: {fileID: 1073040507}
+  m_Layer: 0
+  m_Name: MainThreadDispatcher
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1073040507
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1073040506}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ea791d8592acd6341853c8f71933a924, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+--- !u!4 &1073040508
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1073040506}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 3.1809835, y: -1.4089538, z: -2.5618255}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_RootOrder: 12
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1103567767
 GameObject:
   m_ObjectHideFlags: 8
@@ -6090,7 +6110,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: dffa243396da20e4a8636701ed00878a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  baseGripForce: 5.9
+  baseGripForce: 23.3
   forceVariability: 0.5
   forceChangeRate: 0.12
   showDebugInfo: 0
@@ -8127,6 +8147,54 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 46398bc5d6905ad429a6d2d973afe002, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+--- !u!1 &1493371638
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1493371640}
+  - component: {fileID: 1493371639}
+  m_Layer: 0
+  m_Name: AluminumCanA2CClient
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1493371639
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1493371638}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 526854a067d67854789269e3566a0d0c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  serverHost: localhost
+  serverPort: 12345
+  aluminumCan: {fileID: 0}
+  sendInterval: 0.5
+  enableDebugLogs: 1
+--- !u!4 &1493371640
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1493371638}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 3.1809835, y: -1.4089538, z: -2.5618255}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_RootOrder: 13
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!4 &1553394582 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 8214453809557477258, guid: 5eecd5da92eb64eb6876d43ca0009083, type: 3}
