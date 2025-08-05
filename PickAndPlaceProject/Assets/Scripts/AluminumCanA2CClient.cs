@@ -1,4 +1,4 @@
-// AluminumCanA2CClient.cs (Newtonsoft不要版)
+// AluminumCanA2CClient.cs (重複送信防止修正版)
 using System;
 using System.Net.Sockets;
 using System.Text;
@@ -56,9 +56,10 @@ public class AluminumCanA2CClient : MonoBehaviour
     private bool isConnected = false;
     private bool shouldStop = false;
     
-    // 状態管理
+    // 🔥 状態管理（修正）
     private bool lastCrushedState = false;
     private float lastSendTime = 0f;
+    private bool hasEvaluatedThisEpisode = false; // 追加：エピソードごとの評価フラグ
     
     // イベント
     public event System.Action<bool> OnConnectionChanged;
@@ -85,6 +86,12 @@ public class AluminumCanA2CClient : MonoBehaviour
     
     void Update()
     {
+        // 🔥 修正：既に評価済みの場合は送信しない
+        if (hasEvaluatedThisEpisode)
+        {
+            return; // 送信停止
+        }
+        
         // 定期的にアルミ缶の状態をA2Cに送信
         if (isConnected && Time.time - lastSendTime >= sendInterval)
         {
@@ -186,13 +193,25 @@ public class AluminumCanA2CClient : MonoBehaviour
             timestamp = Time.time
         };
         
-        SendMessage(message);
+        // 🔥 修正：つぶれた瞬間に一度だけ送信
+        if (message.is_crushed && !lastCrushedState)
+        {
+            // つぶれた瞬間
+            SendMessage(message);
+            hasEvaluatedThisEpisode = true; // フラグを立てて以降の送信を停止
+            
+            if (enableDebugLogs)
+                Debug.Log("🥤 缶がつぶれました - A2Cに最終状態を送信（一度だけ）");
+        }
+        else if (!message.is_crushed)
+        {
+            // つぶれていない場合は通常通り送信
+            SendMessage(message);
+        }
         
         // 状態変化をログ出力
         if (message.is_crushed != lastCrushedState)
         {
-            if (enableDebugLogs)
-                Debug.Log($"🥤 缶状態変化: {(message.is_crushed ? "つぶれた" : "正常")}");
             lastCrushedState = message.is_crushed;
         }
     }
@@ -217,11 +236,25 @@ public class AluminumCanA2CClient : MonoBehaviour
     
     public void SendReset()
     {
+        // 🔥 修正：リセット時にフラグもリセット
+        hasEvaluatedThisEpisode = false;
+        lastCrushedState = false;
+        
         var resetMessage = new SimpleMessage { type = "reset", timestamp = Time.time };
         SendMessage(resetMessage);
         
         if (enableDebugLogs)
-            Debug.Log("🔄 リセット通知を送信");
+            Debug.Log("🔄 リセット通知を送信（評価フラグもリセット）");
+    }
+    
+    // 🔥 新しいメソッド：外部から新エピソード開始を通知
+    public void OnNewEpisodeStarted()
+    {
+        hasEvaluatedThisEpisode = false;
+        lastCrushedState = false;
+        
+        if (enableDebugLogs)
+            Debug.Log("🆕 新エピソード開始 - 評価フラグをリセット");
     }
     
     void SendMessage(object message)
