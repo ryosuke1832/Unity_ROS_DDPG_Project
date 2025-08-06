@@ -24,7 +24,7 @@ public class IntegratedAluminumCan : MonoBehaviour
     [Header("新機能：コライダーサイズ変更設定")]
     [Range(1f, 10f)]
     [Tooltip("この力以下でコライダーが小さくなる（N）")]
-    public float minimumGripForce = 5f;
+    public float minimumGripForce = 10f;
     
     [Range(0.1f, 1f)]
     [Tooltip("力不足時のコライダーサイズ倍率")]
