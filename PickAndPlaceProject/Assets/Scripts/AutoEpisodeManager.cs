@@ -27,10 +27,10 @@ public class AutoEpisodeManager : MonoBehaviour
     
     [Header("把持力ランダム化")]
     public bool enableRandomGripForce = true;
-    [Range(8f, 30f)]
-    public float minGripForce = 8f;
-    [Range(8f, 30f)]
-    public float maxGripForce = 20f;
+    [Range(5f, 30f)]
+    public float minGripForce = 7f;
+    [Range(5f, 30f)]
+    public float maxGripForce = 15f;
     public bool logGripForceChanges = true;
     
     [Header("自動実行設定")]
@@ -496,56 +496,56 @@ public class AutoEpisodeManager : MonoBehaviour
         Debug.Log(new string('=', 50));
     }
     
-    // GUI表示（ゲーム実行中の情報表示）
-    void OnGUI()
-    {
-        if (!enableAutoEpisodes || !showEpisodeStats) return;
+    // // GUI表示（ゲーム実行中の情報表示）
+    // void OnGUI()
+    // {
+    //     if (!enableAutoEpisodes || !showEpisodeStats) return;
         
-        GUIStyle style = new GUIStyle();
-        style.fontSize = 14;
-        style.normal.textColor = Color.white;
+    //     GUIStyle style = new GUIStyle();
+    //     style.fontSize = 14;
+    //     style.normal.textColor = Color.white;
         
-        float y = 10f;
-        float lineHeight = 20f;
+    //     float y = 10f;
+    //     float lineHeight = 20f;
         
-        GUI.Label(new Rect(10, y, 400, lineHeight), $"自動エピソード実行中", style);
-        y += lineHeight;
+    //     GUI.Label(new Rect(10, y, 400, lineHeight), $"自動エピソード実行中", style);
+    //     y += lineHeight;
         
-        GUI.Label(new Rect(10, y, 400, lineHeight), $"状態: {currentState}", style);
-        y += lineHeight;
+    //     GUI.Label(new Rect(10, y, 400, lineHeight), $"状態: {currentState}", style);
+    //     y += lineHeight;
         
-        GUI.Label(new Rect(10, y, 400, lineHeight), $"エピソード: {currentEpisodeNumber}/{maxEpisodesPerSession}", style);
-        y += lineHeight;
+    //     GUI.Label(new Rect(10, y, 400, lineHeight), $"エピソード: {currentEpisodeNumber}/{maxEpisodesPerSession}", style);
+    //     y += lineHeight;
         
-        if (currentState == EpisodeState.Running)
-        {
-            float episodeTime = Time.time - episodeStartTime;
-            GUI.Label(new Rect(10, y, 400, lineHeight), $"経過時間: {episodeTime:F1}秒", style);
-            y += lineHeight;
-        }
+    //     if (currentState == EpisodeState.Running)
+    //     {
+    //         float episodeTime = Time.time - episodeStartTime;
+    //         GUI.Label(new Rect(10, y, 400, lineHeight), $"経過時間: {episodeTime:F1}秒", style);
+    //         y += lineHeight;
+    //     }
         
-        if (currentEpisodeNumber > 0)
-        {
-            float successRate = (float)successfulEpisodes / currentEpisodeNumber * 100f;
-            GUI.Label(new Rect(10, y, 400, lineHeight), $"成功率: {successRate:F1}% ({successfulEpisodes}/{currentEpisodeNumber})", style);
-            y += lineHeight;
-        }
+    //     if (currentEpisodeNumber > 0)
+    //     {
+    //         float successRate = (float)successfulEpisodes / currentEpisodeNumber * 100f;
+    //         GUI.Label(new Rect(10, y, 400, lineHeight), $"成功率: {successRate:F1}% ({successfulEpisodes}/{currentEpisodeNumber})", style);
+    //         y += lineHeight;
+    //     }
         
-        // 把持力情報
-        if (enableRandomGripForce && currentEpisodeGripForce > 0)
-        {
-            GUI.Label(new Rect(10, y, 400, lineHeight), $"現在の把持力: {currentEpisodeGripForce:F1}N", style);
-            y += lineHeight;
-        }
+    //     // 把持力情報
+    //     if (enableRandomGripForce && currentEpisodeGripForce > 0)
+    //     {
+    //         GUI.Label(new Rect(10, y, 400, lineHeight), $"現在の把持力: {currentEpisodeGripForce:F1}N", style);
+    //         y += lineHeight;
+    //     }
         
-        GUI.Label(new Rect(10, y, 400, lineHeight), $"ロボット移動中: {(isRobotMoving ? "Yes" : "No")}", style);
-        y += lineHeight;
+    //     GUI.Label(new Rect(10, y, 400, lineHeight), $"ロボット移動中: {(isRobotMoving ? "Yes" : "No")}", style);
+    //     y += lineHeight;
         
-        if (aluminumCan != null)
-        {
-            GUI.Label(new Rect(10, y, 400, lineHeight), $"缶の状態: {(aluminumCan.IsBroken ? "つぶれた" : "正常")}", style);
-        }
-    }
+    //     if (aluminumCan != null)
+    //     {
+    //         GUI.Label(new Rect(10, y, 400, lineHeight), $"缶の状態: {(aluminumCan.IsBroken ? "つぶれた" : "正常")}", style);
+    //     }
+    // }
     
     #endregion
     

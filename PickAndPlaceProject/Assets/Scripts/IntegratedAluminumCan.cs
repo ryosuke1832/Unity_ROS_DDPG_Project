@@ -17,7 +17,7 @@ public class IntegratedAluminumCan : MonoBehaviour
     [Header("変形設定")]
     [Range(1f, 100f)]
     [Tooltip("変形が発生する力の閾値（N）")]
-    [SerializeField] private float _deformationThreshold = 15f;
+    [SerializeField] private float _deformationThreshold = 12f;
 
     private const float DEFORMATION_DELAY = 0.2f; // 0.2秒の遅延
     
@@ -28,7 +28,7 @@ public class IntegratedAluminumCan : MonoBehaviour
     
     [Range(0.1f, 1f)]
     [Tooltip("力不足時のコライダーサイズ倍率")]
-    public float weakGripColliderScale = 0.4f;
+    public float weakGripColliderScale = 0.2f;
     
     [Range(0.1f, 2f)]
     [Tooltip("コライダーサイズ変更の遅延時間")]
