@@ -17,7 +17,7 @@ public class IntegratedAluminumCan : MonoBehaviour
     [Header("変形設定")]
     [Range(1f, 100f)]
     [Tooltip("変形が発生する力の閾値（N）")]
-    [SerializeField] private float _deformationThreshold = 12f;
+    [SerializeField] private float _deformationThreshold = 15f;
 
     private const float DEFORMATION_DELAY = 0.2f; // 0.2秒の遅延
     
@@ -677,43 +677,43 @@ public class IntegratedAluminumCan : MonoBehaviour
         }
     }
 
-    void OnGUI()
-    {
-        if (!showDebugInfo) return;
+    // void OnGUI()
+    // {
+    //     if (!showDebugInfo) return;
         
-        GUIStyle style = new GUIStyle();
-        style.fontSize = 14;
-        style.normal.textColor = Color.white;
+    //     GUIStyle style = new GUIStyle();
+    //     style.fontSize = 14;
+    //     style.normal.textColor = Color.white;
         
-        var gripController = FindObjectOfType<SimpleGripForceController>();
-        if (gripController != null)
-        {
-            GUI.Label(new Rect(10, 10, 300, 20), $"缶の状態: {(isCrushed ? "つぶれた" : "正常")}", style);
-            GUI.Label(new Rect(10, 30, 300, 20), $"BaseGripForce: {gripController.baseGripForce:F2}N", style);
-            GUI.Label(new Rect(10, 50, 300, 20), $"変形閾値: {deformationThreshold:F2}N", style);
-            GUI.Label(new Rect(10, 70, 300, 20), $"変形判定: {(gripController.baseGripForce > deformationThreshold ? "変形" : "正常")}", style);
+    //     var gripController = FindObjectOfType<SimpleGripForceController>();
+    //     if (gripController != null)
+    //     {
+    //         GUI.Label(new Rect(10, 10, 300, 20), $"缶の状態: {(isCrushed ? "つぶれた" : "正常")}", style);
+    //         GUI.Label(new Rect(10, 30, 300, 20), $"BaseGripForce: {gripController.baseGripForce:F2}N", style);
+    //         GUI.Label(new Rect(10, 50, 300, 20), $"変形閾値: {deformationThreshold:F2}N", style);
+    //         GUI.Label(new Rect(10, 70, 300, 20), $"変形判定: {(gripController.baseGripForce > deformationThreshold ? "変形" : "正常")}", style);
             
-            // 新機能：コライダー&摩擦状態の表示
-            string colliderState = isColliderSmall ? "小さい" : "通常";
-            string frictionState = isSlippery ? " + 滑りやすい" : "";
-            GUI.Label(new Rect(10, 90, 350, 20), $"コライダー: {colliderState}{frictionState}", style);
-            GUI.Label(new Rect(10, 110, 300, 20), $"最小把持力: {minimumGripForce:F2}N", style);
+    //         // 新機能：コライダー&摩擦状態の表示
+    //         string colliderState = isColliderSmall ? "小さい" : "通常";
+    //         string frictionState = isSlippery ? " + 滑りやすい" : "";
+    //         GUI.Label(new Rect(10, 90, 350, 20), $"コライダー: {colliderState}{frictionState}", style);
+    //         GUI.Label(new Rect(10, 110, 300, 20), $"最小把持力: {minimumGripForce:F2}N", style);
             
-            if (canBoxCollider != null)
-            {
-                GUI.Label(new Rect(10, 130, 300, 20), $"サイズ: X={canBoxCollider.size.x:F3}, Y={canBoxCollider.size.y:F3}, Z={canBoxCollider.size.z:F3}", style);
-            }
+    //         if (canBoxCollider != null)
+    //         {
+    //             GUI.Label(new Rect(10, 130, 300, 20), $"サイズ: X={canBoxCollider.size.x:F3}, Y={canBoxCollider.size.y:F3}, Z={canBoxCollider.size.z:F3}", style);
+    //         }
             
-            float progress = gripController.baseGripForce / deformationThreshold;
-            GUI.Box(new Rect(10, 150, 200, 20), "");
-            GUI.Box(new Rect(10, 150, 200 * Mathf.Clamp01(progress), 20), "");
-            GUI.Label(new Rect(10, 150, 200, 20), $"力の比率: {(progress * 100):F1}%", style);
-        }
-        else
-        {
-            GUI.Label(new Rect(10, 10, 300, 20), "SimpleGripForceController not found!", style);
-        }
-    }
+    //         float progress = gripController.baseGripForce / deformationThreshold;
+    //         GUI.Box(new Rect(10, 150, 200, 20), "");
+    //         GUI.Box(new Rect(10, 150, 200 * Mathf.Clamp01(progress), 20), "");
+    //         GUI.Label(new Rect(10, 150, 200, 20), $"力の比率: {(progress * 100):F1}%", style);
+    //     }
+    //     else
+    //     {
+    //         GUI.Label(new Rect(10, 10, 300, 20), "SimpleGripForceController not found!", style);
+    //     }
+    // }
 }
 
 // MaterialTypeの定義（既存コードとの互換性）

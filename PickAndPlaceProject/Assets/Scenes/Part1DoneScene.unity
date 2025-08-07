@@ -2237,7 +2237,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   normalCanModel: {fileID: 806208462}
   crushedCanModel: {fileID: 676011064}
-  _deformationThreshold: 12
+  _deformationThreshold: 15
   minimumGripForce: 10
   weakGripColliderScale: 0.2
   colliderChangeDelay: 0.3
@@ -5043,8 +5043,8 @@ MonoBehaviour:
   resetDelay: 2
   completionCheckInterval: 1.5
   enableRandomGripForce: 1
-  minGripForce: 7
-  maxGripForce: 15
+  minGripForce: 2
+  maxGripForce: 30
   logGripForceChanges: 1
   enableAutoEpisodes: 1
   startOnAwake: 1
@@ -6173,8 +6173,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   baseGripForce: 12
-  forceVariability: 0.5
-  forceChangeRate: 0.12
+  forceVariability: 0
+  forceChangeRate: 1
   showDebugInfo: 0
 --- !u!4 &1124406059
 Transform:

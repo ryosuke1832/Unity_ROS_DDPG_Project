@@ -596,11 +596,11 @@ private void UpdateGripperState()
         // 力による判定（アルミ缶専用の閾値）
         float force = objectState.appliedForce;
         
-        if (force < 2f)
+        if (force < 10f)
             return GraspResult.UnderGrip;
-        else if (force > 20f && !objectState.isBroken) // まだつぶれていないが危険な力
+        else if (force > 15f && !objectState.isBroken) // まだつぶれていないが危険な力
             return GraspResult.OverGrip;
-        else if (force >= 2f && force <= 15f) // アルミ缶に適切な力範囲
+        else if (force >= 10f && force <= 15f) // アルミ缶に適切な力範囲
             return GraspResult.Success;
         else
             return GraspResult.Failure;

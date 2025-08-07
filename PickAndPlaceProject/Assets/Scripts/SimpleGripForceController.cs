@@ -27,8 +27,9 @@ public class SimpleGripForceController : MonoBehaviour
     void Update()
     {
         // 基本的な力制御
-        float targetForce = baseGripForce + Random.Range(-forceVariability, forceVariability) * baseGripForce;
-        currentTargetForce = Mathf.Lerp(currentTargetForce, targetForce, forceChangeRate * Time.deltaTime);
+        currentTargetForce = baseGripForce; 
+        // float targetForce = baseGripForce + Random.Range(-forceVariability, forceVariability) * baseGripForce;
+        // currentTargetForce = Mathf.Lerp(currentTargetForce, targetForce, forceChangeRate * Time.deltaTime);
     }
     
     public float GetCurrentTargetForce()
