@@ -85,36 +85,21 @@ public class AluminumCanA2CClient : MonoBehaviour
     }
     
     void Update()
+{
+    // デバッグ追加
+    if (enableDebugLogs && hasEvaluatedThisEpisode)
     {
-        // 🔥 修正：既に評価済みの場合は送信しない
-        if (hasEvaluatedThisEpisode)
-        {
-            return; // 送信停止
-        }
-        
-        // 定期的にアルミ缶の状態をA2Cに送信
-        if (isConnected && Time.time - lastSendTime >= sendInterval)
-        {
-            SendCanState();
-            lastSendTime = Time.time;
-        }
-        
-        // デバッグ用キー入力
-        if (Input.GetKeyDown(KeyCode.R))
-        {
-            SendReset();
-        }
-        
-        if (Input.GetKeyDown(KeyCode.E))
-        {
-            SendEpisodeEnd();
-        }
-        
-        if (Input.GetKeyDown(KeyCode.P))
-        {
-            SendPing();
-        }
+        Debug.Log("⏸️ 評価済みのため送信停止中");
+        return;
     }
+    
+    if (isConnected && Time.time - lastSendTime >= sendInterval)
+    {
+        Debug.Log("🔄 SendCanState()を呼び出し"); // 追加
+        SendCanState();
+        lastSendTime = Time.time;
+    }
+}
     
     #region 接続管理
     
@@ -178,43 +163,56 @@ public class AluminumCanA2CClient : MonoBehaviour
     #endregion
     
     #region メッセージ送信
-    
     void SendCanState()
-    {
-        if (!isConnected || aluminumCan == null) return;
-        
-        var state = aluminumCan.GetCurrentState();
-        
-        var message = new CanStateMessage
-        {
-            is_crushed = state.isBroken,
-            current_force = state.appliedForce,
-            accumulated_force = aluminumCan.GetAccumulatedForce(),
-            timestamp = Time.time
-        };
-        
-        // 🔥 修正：つぶれた瞬間に一度だけ送信
-        if (message.is_crushed && !lastCrushedState)
-        {
-            // つぶれた瞬間
-            SendMessage(message);
-            hasEvaluatedThisEpisode = true; // フラグを立てて以降の送信を停止
-            
-            if (enableDebugLogs)
-                Debug.Log("🥤 缶がつぶれました - A2Cに最終状態を送信（一度だけ）");
-        }
-        else if (!message.is_crushed)
-        {
-            // つぶれていない場合は通常通り送信
-            SendMessage(message);
-        }
-        
-        // 状態変化をログ出力
-        if (message.is_crushed != lastCrushedState)
-        {
-            lastCrushedState = message.is_crushed;
-        }
+{
+    Debug.Log("🔍 SendCanState開始");
+
+    if (!isConnected || aluminumCan == null) {
+        Debug.Log("❌ 送信条件未満：接続=" + isConnected + " アルミ缶=" + (aluminumCan != null));
+        return;
     }
+    
+    var state = aluminumCan.GetCurrentState();
+    Debug.Log($"🔍 缶の状態取得：潰れ={state.isBroken} 力={state.appliedForce}");
+    
+    var message = new CanStateMessage
+    {
+        is_crushed = state.isBroken,
+        current_force = state.appliedForce,
+        accumulated_force = aluminumCan.GetAccumulatedForce(),
+        timestamp = Time.time
+    };
+    
+    // 🔥 修正：つぶれた瞬間に一度だけ送信
+    if (message.is_crushed && !lastCrushedState)
+    {
+        // つぶれた瞬間
+        Debug.Log("🔥 つぶれた瞬間の送信");
+        SendMessage(message);
+        hasEvaluatedThisEpisode = true; // フラグを立てて以降の送信を停止
+        
+        if (enableDebugLogs)
+            Debug.Log("🥤 缶がつぶれました - A2Cに最終状態を送信（一度だけ）");
+    }
+    else if (!message.is_crushed)
+    {
+        // つぶれていない場合は通常通り送信
+        Debug.Log("🔥 通常状態の送信");
+        SendMessage(message);
+    }
+    else
+    {
+        Debug.Log("🔥 送信条件に該当せず（既につぶれた状態）");
+    }
+    
+    // 状態変化をログ出力
+    if (message.is_crushed != lastCrushedState)
+    {
+        lastCrushedState = message.is_crushed;
+        if (enableDebugLogs)
+            Debug.Log($"🔄 状態変化: {!message.is_crushed} → {message.is_crushed}");
+    }
+}
     
     void SendPing()
     {
@@ -267,9 +265,9 @@ public class AluminumCanA2CClient : MonoBehaviour
             byte[] data = Encoding.UTF8.GetBytes(json);
             stream.Write(data, 0, data.Length);
             
-            if (enableDebugLogs && message.GetType() != typeof(CanStateMessage))
+            if (enableDebugLogs)
             {
-                Debug.Log($"📤 送信: {json}");
+                Debug.Log($"📤 送信データ: {json}");
             }
         }
         catch (Exception e)

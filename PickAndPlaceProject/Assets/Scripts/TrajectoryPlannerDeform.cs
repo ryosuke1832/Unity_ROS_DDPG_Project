@@ -18,7 +18,7 @@ public class TrajectoryPlannerDeform : MonoBehaviour
     public bool resetOnStart = true;
     
     [Header("把持設定")]
-    public float graspEvaluationDelay = 1f;
+    public float graspEvaluationDelay = 3f;
     public bool enableDeformationLogging = true;
     
     // 元のTrajectoryPlannerへの参照
