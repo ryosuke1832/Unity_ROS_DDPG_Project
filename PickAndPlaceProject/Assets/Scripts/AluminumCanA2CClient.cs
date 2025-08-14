@@ -1,4 +1,3 @@
-// AluminumCanA2CClient.cs (重複送信防止修正版)
 using System;
 using System.Net.Sockets;
 using System.Text;
@@ -11,6 +10,7 @@ public class CanStateMessage
 {
     public string type = "can_state";
     public bool is_crushed;
+    public string grasp_result;
     public float current_force;
     public float accumulated_force;
     public float timestamp;
@@ -44,7 +44,7 @@ public class AluminumCanA2CClient : MonoBehaviour
     
     [Header("送信設定")]
     [Range(0.1f, 2.0f)]
-    public float sendInterval = 0.5f; // 0.5秒ごとに送信
+    public float sendInterval = 0.5f;
     
     [Header("デバッグ")]
     public bool enableDebugLogs = true;
@@ -56,10 +56,12 @@ public class AluminumCanA2CClient : MonoBehaviour
     private bool isConnected = false;
     private bool shouldStop = false;
     
-    // 🔥 状態管理（修正）
+    // 🔥 状態管理（修正版）
     private bool lastCrushedState = false;
     private float lastSendTime = 0f;
-    private bool hasEvaluatedThisEpisode = false; // 追加：エピソードごとの評価フラグ
+    private bool hasEvaluatedThisEpisode = false; // エピソードごとの評価フラグ
+    private bool isEpisodeActive = false; // エピソードアクティブ状態
+    private float lastForce = 0f; // 前回の力の値
     
     // イベント
     public event System.Action<bool> OnConnectionChanged;
@@ -85,21 +87,31 @@ public class AluminumCanA2CClient : MonoBehaviour
     }
     
     void Update()
-{
-    // デバッグ追加
-    if (enableDebugLogs && hasEvaluatedThisEpisode)
     {
-        Debug.Log("⏸️ 評価済みのため送信停止中");
-        return;
+        // 🔥 修正：エピソードがアクティブでない場合は送信しない
+        if (!isEpisodeActive)
+        {
+            if (enableDebugLogs)
+                // Debug.Log("⏸️ エピソード非アクティブのため送信停止");
+            return;
+        }
+        
+        // 評価済みの場合は送信停止
+        if (hasEvaluatedThisEpisode)
+        {
+            if (enableDebugLogs)
+                Debug.Log("⏸️ 評価済みのため送信停止中");
+            return;
+        }
+        
+        if (isConnected && Time.time - lastSendTime >= sendInterval)
+        {
+            if (enableDebugLogs)
+                Debug.Log("🔄 SendCanState()を呼び出し");
+            SendCanState();
+            lastSendTime = Time.time;
+        }
     }
-    
-    if (isConnected && Time.time - lastSendTime >= sendInterval)
-    {
-        Debug.Log("🔄 SendCanState()を呼び出し"); // 追加
-        SendCanState();
-        lastSendTime = Time.time;
-    }
-}
     
     #region 接続管理
     
@@ -163,56 +175,87 @@ public class AluminumCanA2CClient : MonoBehaviour
     #endregion
     
     #region メッセージ送信
+    
     void SendCanState()
-{
-    Debug.Log("🔍 SendCanState開始");
+    {
+        if (enableDebugLogs)
+            Debug.Log("🔍 SendCanState開始");
 
-    if (!isConnected || aluminumCan == null) {
-        Debug.Log("❌ 送信条件未満：接続=" + isConnected + " アルミ缶=" + (aluminumCan != null));
-        return;
-    }
-    
-    var state = aluminumCan.GetCurrentState();
-    Debug.Log($"🔍 缶の状態取得：潰れ={state.isBroken} 力={state.appliedForce}");
-    
-    var message = new CanStateMessage
-    {
-        is_crushed = state.isBroken,
-        current_force = state.appliedForce,
-        accumulated_force = aluminumCan.GetAccumulatedForce(),
-        timestamp = Time.time
-    };
-    
-    // 🔥 修正：つぶれた瞬間に一度だけ送信
-    if (message.is_crushed && !lastCrushedState)
-    {
-        // つぶれた瞬間
-        Debug.Log("🔥 つぶれた瞬間の送信");
-        SendMessage(message);
-        hasEvaluatedThisEpisode = true; // フラグを立てて以降の送信を停止
+        if (!isConnected || aluminumCan == null) {
+            if (enableDebugLogs)
+                Debug.Log("❌ 送信条件未満：接続=" + isConnected + " アルミ缶=" + (aluminumCan != null));
+            return;
+        }
         
+        var state = aluminumCan.GetCurrentState();
         if (enableDebugLogs)
-            Debug.Log("🥤 缶がつぶれました - A2Cに最終状態を送信（一度だけ）");
-    }
-    else if (!message.is_crushed)
-    {
-        // つぶれていない場合は通常通り送信
-        Debug.Log("🔥 通常状態の送信");
-        SendMessage(message);
-    }
-    else
-    {
-        Debug.Log("🔥 送信条件に該当せず（既につぶれた状態）");
-    }
-    
-    // 状態変化をログ出力
-    if (message.is_crushed != lastCrushedState)
-    {
+            Debug.Log($"🔍 缶の状態取得：潰れ={state.isBroken} 力={state.appliedForce}");
+        
+        var message = new CanStateMessage
+        {
+            is_crushed = state.isBroken,
+            grasp_result = DetermineGraspResult(),
+            current_force = state.appliedForce,
+            accumulated_force = aluminumCan.GetAccumulatedForce(),
+            timestamp = Time.time
+        };
+        
+        // 🔥 修正：送信条件を厳格化
+        bool shouldSend = false;
+        string sendReason = "";
+        
+        if (message.is_crushed && !lastCrushedState)
+        {
+            // つぶれた瞬間 - 一度だけ送信
+            shouldSend = true;
+            sendReason = "つぶれた瞬間";
+            hasEvaluatedThisEpisode = true; // 評価完了フラグ
+        }
+        else if (!message.is_crushed && Math.Abs(message.current_force - lastForce) > 0.1f)
+        {
+            // 力に有意な変化がある場合のみ送信（0.1N以上の変化）
+            shouldSend = true;
+            sendReason = "力の変化";
+        }
+        else if (!message.is_crushed && message.current_force > 0.1f && lastForce <= 0.1f)
+        {
+            // 把持開始時（力が0から増加した瞬間）
+            shouldSend = true;
+            sendReason = "把持開始";
+        }
+        
+        if (shouldSend)
+        {
+            if (enableDebugLogs)
+                Debug.Log($"🔥 {sendReason}の送信");
+            SendMessage(message);
+        }
+        else
+        {
+            if (enableDebugLogs)
+                Debug.Log("🔥 送信条件に該当せず（変化なし）");
+        }
+        
+        // 状態更新
         lastCrushedState = message.is_crushed;
-        if (enableDebugLogs)
-            Debug.Log($"🔄 状態変化: {!message.is_crushed} → {message.is_crushed}");
+        lastForce = message.current_force;
     }
-}
+
+    private string DetermineGraspResult()
+    {
+        if (aluminumCan.IsBroken)
+            return "overgrip";
+        
+        // AutoEpisodeManagerの成功判定ロジックを使用
+        var episodeManager = FindObjectOfType<AutoEpisodeManager>();
+        if (episodeManager != null)
+        {
+            bool isSuccess = episodeManager.DetermineEpisodeSuccess(); // publicにする必要あり
+            return isSuccess ? "success" : "undergrip";
+        }
+        
+        return "undergrip";
+    }
     
     void SendPing()
     {
@@ -228,15 +271,20 @@ public class AluminumCanA2CClient : MonoBehaviour
         var endMessage = new SimpleMessage { type = "episode_end", timestamp = Time.time };
         SendMessage(endMessage);
         
+        // 🔥 修正：エピソード終了時に送信停止
+        isEpisodeActive = false;
+        
         if (enableDebugLogs)
             Debug.Log("📋 エピソード終了通知を送信");
     }
     
     public void SendReset()
     {
-        // 🔥 修正：リセット時にフラグもリセット
+        // 🔥 修正：リセット時にすべてのフラグをリセット
         hasEvaluatedThisEpisode = false;
         lastCrushedState = false;
+        lastForce = 0f;
+        isEpisodeActive = true; // エピソード開始
         
         var resetMessage = new SimpleMessage { type = "reset", timestamp = Time.time };
         SendMessage(resetMessage);
@@ -245,14 +293,24 @@ public class AluminumCanA2CClient : MonoBehaviour
             Debug.Log("🔄 リセット通知を送信（評価フラグもリセット）");
     }
     
-    // 🔥 新しいメソッド：外部から新エピソード開始を通知
+    // 🔥 新しいメソッド：外部からエピソード状態を制御
     public void OnNewEpisodeStarted()
     {
         hasEvaluatedThisEpisode = false;
         lastCrushedState = false;
+        lastForce = 0f;
+        isEpisodeActive = true;
         
         if (enableDebugLogs)
             Debug.Log("🆕 新エピソード開始 - 評価フラグをリセット");
+    }
+    
+    public void OnEpisodeCompleted()
+    {
+        isEpisodeActive = false;
+        
+        if (enableDebugLogs)
+            Debug.Log("🏁 エピソード完了 - 送信を停止");
     }
     
     void SendMessage(object message)

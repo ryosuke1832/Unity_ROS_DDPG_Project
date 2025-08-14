@@ -519,8 +519,8 @@ public class IntegratedAluminumCan : MonoBehaviour
     {
         if (Time.frameCount % 60 == 0)
         {
-            string status = isCrushed ? "つぶれた" : "正常";
-            Debug.Log($"缶の状態: {status}, 現在の力: {appliedForce:F2}N, 蓄積力: {accumulatedForce:F2}N");
+            // string status = isCrushed ? "つぶれた" : "正常";
+            // Debug.Log($"缶の状態: {status}, 現在の力: {appliedForce:F2}N, 蓄積力: {accumulatedForce:F2}N");
         }
     }
     

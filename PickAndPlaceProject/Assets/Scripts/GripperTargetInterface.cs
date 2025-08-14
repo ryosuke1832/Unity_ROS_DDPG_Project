@@ -487,7 +487,7 @@ private void UpdateGripperState()
         }
     }
     
-    private bool HasValidContact()
+    public bool HasValidContact()
     {
         return requireBothGrippersContact ? 
             (leftGripperInContact && rightGripperInContact) : 

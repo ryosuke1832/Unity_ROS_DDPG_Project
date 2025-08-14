@@ -14,6 +14,7 @@ public class AutoEpisodeManager : MonoBehaviour
     public IntegratedAluminumCan aluminumCan;
     public GameObject niryoOneRobot; // 直接ロボットオブジェクトを参照
     public SimpleGripForceController gripForceController; // 把持力制御
+    public GripperTargetInterface gripperInterface;
     
     [Header("エピソード設定")]
     [Range(1f, 10f)]
@@ -56,6 +57,10 @@ public class AutoEpisodeManager : MonoBehaviour
     private float lastMovementTime = 0f;
     private Vector3 lastRobotPosition = Vector3.zero;
     private bool isRobotMoving = false;
+    private Vector3 initialCanPosition = Vector3.zero; 
+
+    
+
     
     // 統計
     private int successfulEpisodes = 0;
@@ -123,6 +128,9 @@ public class AutoEpisodeManager : MonoBehaviour
         // 把持力制御の自動検索
         if (gripForceController == null)
             gripForceController = FindObjectOfType<SimpleGripForceController>();
+        
+        if (gripperInterface == null)
+            gripperInterface = FindObjectOfType<GripperTargetInterface>();
         
         // ロボットオブジェクトの自動検索
         if (niryoOneRobot == null)
@@ -259,6 +267,11 @@ public class AutoEpisodeManager : MonoBehaviour
         currentEpisodeNumber++;
         episodeStartTime = Time.time;
         lastMovementTime = Time.time;
+
+        if (aluminumCan != null)
+        {
+            initialCanPosition = aluminumCan.transform.position;
+        }
         
         // ランダム把持力の設定
         if (enableRandomGripForce && gripForceController != null)
@@ -443,18 +456,54 @@ public class AutoEpisodeManager : MonoBehaviour
         
         return false;
     }
-    
-    bool DetermineEpisodeSuccess()
+        
+    public bool DetermineEpisodeSuccess()
     {
-        // 成功条件：アルミ缶がつぶれていない
-        if (aluminumCan != null)
+        // 基本条件：アルミ缶がつぶれていない
+        if (aluminumCan == null || aluminumCan.IsBroken)
         {
-            return !aluminumCan.IsBroken;
+            return false;
         }
         
-        return false;
+        // 追加条件1：グリッパーが物体と接触している
+        bool hasValidContact = false;
+        if (gripperInterface != null)
+        {
+            hasValidContact = gripperInterface.HasValidContact();
+        }
+        
+        // 追加条件2：物体が一定高さまで持ち上げられている
+        bool isLifted = false;
+        if (aluminumCan != null)
+        {
+            // ROSコードでは0.10m持ち上げるので、その80%程度を成功基準とする
+            float liftHeight = aluminumCan.transform.position.y - initialCanPosition.y;
+            isLifted = liftHeight > 0.08f; // 8cm以上持ち上げられている
+        }
+        
+        // 追加条件3：物体が落下していない（速度チェック）
+        bool notFalling = true;
+        Rigidbody canRigidbody = aluminumCan.GetComponent<Rigidbody>();
+        if (canRigidbody != null)
+        {
+            notFalling = canRigidbody.velocity.y > -0.3f; // 下向き速度が0.3m/s未満
+        }
+        
+        // 改善された成功条件
+        bool success = !aluminumCan.IsBroken && hasValidContact && isLifted && notFalling;
+        
+        if (enableDebugLogs)
+        {
+            Debug.Log($"🔍 成功判定詳細:");
+            Debug.Log($"   つぶれていない: {!aluminumCan.IsBroken}");
+            Debug.Log($"   接触維持: {hasValidContact}");
+            Debug.Log($"   持ち上げ完了: {isLifted}");
+            Debug.Log($"   落下していない: {notFalling}");
+            Debug.Log($"   最終判定: {(success ? "✅成功" : "❌失敗")}");
+        }
+        
+        return success;
     }
-    
     #endregion
     
     #region UI・デバッグ
