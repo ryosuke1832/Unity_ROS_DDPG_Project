@@ -8244,6 +8244,9 @@ MonoBehaviour:
   aluminumCan: {fileID: 0}
   sendInterval: 0.5
   enableDebugLogs: 1
+  showGripForceGUI: 1
+  guiPosition: {x: 10, y: 10}
+  guiSize: {x: 300, y: 150}
 --- !u!4 &1493371640
 Transform:
   m_ObjectHideFlags: 0
