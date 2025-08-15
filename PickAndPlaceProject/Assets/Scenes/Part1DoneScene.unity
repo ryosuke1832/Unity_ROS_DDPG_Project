@@ -5038,7 +5038,8 @@ MonoBehaviour:
   a2cClient: {fileID: 1493371639}
   aluminumCan: {fileID: 622264442}
   niryoOneRobot: {fileID: 366141394}
-  gripForceController: {fileID: 0}
+  gripForceController: {fileID: 1124406058}
+  gripperInterface: {fileID: 1279036587}
   episodeDuration: 30
   resetDelay: 2
   completionCheckInterval: 1.5
