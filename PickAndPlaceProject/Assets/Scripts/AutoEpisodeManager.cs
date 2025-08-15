@@ -5,6 +5,7 @@ using UnityEngine;
 /// <summary>
 /// A2C学習用の自動エピソード管理システム
 /// ロボットの動作完了を検出して自動的に次のエピソードを開始
+/// TCP経由で受信した把持力指令を次のエピソードに適用する機能を追加
 /// </summary>
 public class AutoEpisodeManager : MonoBehaviour
 {
@@ -25,6 +26,13 @@ public class AutoEpisodeManager : MonoBehaviour
     
     [Range(0.1f, 2f)]
     public float completionCheckInterval = 0.5f; // 完了チェックの間隔
+    
+    [Header("🔥 TCP把持力制御")]
+    [SerializeField] private bool enableTcpGripForceControl = false;
+    [Range(1f, 30f)]
+    public float tcpCommandWaitTimeout = 10f; // TCP指令待機のタイムアウト
+    public bool waitForTcpCommandBeforeStart = true; // エピソード開始前にTCP指令を待機
+    public bool useTcpForceWhenAvailable = true; // TCP指令が利用可能な場合に優先使用
     
     [Header("把持力ランダム化")]
     public bool enableRandomGripForce = true;
@@ -50,6 +58,7 @@ public class AutoEpisodeManager : MonoBehaviour
     public bool enableDebugLogs = true;
     public bool showEpisodeStats = true;
     
+    
     // 内部状態
     private EpisodeState currentState = EpisodeState.Idle;
     private int currentEpisodeNumber = 0;
@@ -59,8 +68,11 @@ public class AutoEpisodeManager : MonoBehaviour
     private bool isRobotMoving = false;
     private Vector3 initialCanPosition = Vector3.zero; 
 
-    
-
+    // 🔥 TCP把持力制御用の追加フィールド
+    private float? pendingTcpGripForce = null; // TCPで受信した把持力指令
+    private bool isWaitingForTcpCommand = false;
+    private float tcpCommandWaitStartTime = 0f;
+    private GripForceSource currentGripForceSource = GripForceSource.Random;
     
     // 統計
     private int successfulEpisodes = 0;
@@ -70,11 +82,18 @@ public class AutoEpisodeManager : MonoBehaviour
     // 把持力統計
     private float currentEpisodeGripForce = 0f;
     private System.Collections.Generic.List<float> usedGripForces = new System.Collections.Generic.List<float>();
+    private System.Collections.Generic.List<GripForceSource> gripForceSources = new System.Collections.Generic.List<GripForceSource>();
+    
+    // 🔥 TCP統計
+    private int tcpCommandsReceived = 0;
+    private int tcpCommandsUsed = 0;
+    private int tcpTimeouts = 0;
     
     // 状態管理
     public enum EpisodeState
     {
         Idle,           // 待機中
+        WaitingForTcp,  // 🔥 新規追加：TCP指令待機中
         Starting,       // エピソード開始中
         Running,        // エピソード実行中
         Completing,     // エピソード完了処理中
@@ -82,10 +101,19 @@ public class AutoEpisodeManager : MonoBehaviour
         Finished        // セッション終了
     }
     
+    // 🔥 把持力のソース種別
+    public enum GripForceSource
+    {
+        Random,    // ランダム生成
+        Tcp,       // TCP指令
+        Default    // デフォルト値
+    }
+    
     // イベント
     public System.Action<int> OnEpisodeStarted;
     public System.Action<int, bool> OnEpisodeCompleted; // episodeNumber, wasSuccessful
     public System.Action OnSessionCompleted;
+    public System.Action<float, GripForceSource> OnGripForceApplied; // 🔥 新規追加
     
     void Start()
     {
@@ -104,6 +132,9 @@ public class AutoEpisodeManager : MonoBehaviour
         UpdateEpisodeState();
         UpdateMovementDetection();
         
+        // 🔥 TCP指令の処理
+        HandleTcpGripForceCommands();
+        
         // デバッグUI表示
         if (enableDebugLogs && showEpisodeStats)
         {
@@ -115,6 +146,8 @@ public class AutoEpisodeManager : MonoBehaviour
     
     void InitializeComponents()
     {
+        // 既存の初期化処理...
+        
         // コンポーネントの自動検索
         if (trajectoryPlanner == null)
             trajectoryPlanner = FindObjectOfType<TrajectoryPlannerDeform>();
@@ -135,16 +168,13 @@ public class AutoEpisodeManager : MonoBehaviour
         // ロボットオブジェクトの自動検索
         if (niryoOneRobot == null)
         {
-            // NiryoOneという名前のGameObjectを検索
             niryoOneRobot = GameObject.Find("NiryoOne");
             
-            // 見つからない場合はTrajectoryPlannerコンポーネントから取得を試行
             if (niryoOneRobot == null)
             {
                 TrajectoryPlanner originalPlanner = FindObjectOfType<TrajectoryPlanner>();
                 if (originalPlanner != null)
                 {
-                    // リフレクションでNiryoOneプロパティにアクセス
                     var niryoOneProperty = originalPlanner.GetType().GetProperty("NiryoOne");
                     if (niryoOneProperty != null)
                     {
@@ -160,9 +190,13 @@ public class AutoEpisodeManager : MonoBehaviour
             lastRobotPosition = niryoOneRobot.transform.position;
         }
         
-        // 検索結果確認
+        // 🔥 A2CClientとの連携設定
+        SetupA2CClientIntegration();
+        
+        // 検証とログ出力
         bool allComponentsFound = trajectoryPlanner != null && a2cClient != null && aluminumCan != null && niryoOneRobot != null;
         bool gripForceAvailable = gripForceController != null;
+        bool tcpControlReady = enableTcpGripForceControl && a2cClient != null;
         
         if (enableDebugLogs)
         {
@@ -172,6 +206,7 @@ public class AutoEpisodeManager : MonoBehaviour
             Debug.Log($"AluminumCan: {(aluminumCan != null ? "✅" : "❌")}");
             Debug.Log($"NiryoOne Robot: {(niryoOneRobot != null ? "✅" : "❌")} {(niryoOneRobot != null ? niryoOneRobot.name : "Not Found")}");
             Debug.Log($"GripForceController: {(gripForceController != null ? "✅" : "❌")}");
+            Debug.Log($"🔥 TCP把持力制御: {(tcpControlReady ? "✅有効" : "❌無効")}");
             Debug.Log($"ランダム把持力: {(enableRandomGripForce && gripForceAvailable ? "有効" : "無効")}");
             if (enableRandomGripForce && gripForceAvailable)
             {
@@ -186,6 +221,13 @@ public class AutoEpisodeManager : MonoBehaviour
             Debug.LogError("必要なコンポーネントが見つかりません。自動エピソードを無効化します。");
         }
         
+        // TCP制御の妥当性確認
+        if (enableTcpGripForceControl && !tcpControlReady)
+        {
+            Debug.LogWarning("TCP把持力制御が有効ですが、A2CClientが見つかりません。TCP制御を無効化します。");
+            enableTcpGripForceControl = false;
+        }
+        
         // ランダム把持力が有効だが制御器がない場合の警告
         if (enableRandomGripForce && !gripForceAvailable)
         {
@@ -193,9 +235,178 @@ public class AutoEpisodeManager : MonoBehaviour
             enableRandomGripForce = false;
         }
     }
-    #endregion
-
     
+    // 🔥 A2CClientとの連携設定
+    void SetupA2CClientIntegration()
+    {
+        if (a2cClient == null) return;
+        
+        // TCP把持力指令受信のための直接メソッド呼び出し設定
+        // A2CClientから直接OnTcpGripForceCommandReceivedを呼び出してもらう
+        
+        if (enableDebugLogs)
+        {
+            Debug.Log("🔥 A2CClientとの連携を設定しました");
+            Debug.Log("注意: A2CClientから直接OnTcpGripForceCommandReceived()を呼び出してください");
+        }
+    }
+    
+    #endregion
+    
+    #region 🔥 TCP把持力制御
+    
+    /// <summary>
+    /// TCP経由で把持力指令を受信した場合に呼び出される
+    /// A2CClientから呼び出されることを想定
+    /// </summary>
+    public void OnTcpGripForceCommandReceived(float gripForce)
+    {
+        tcpCommandsReceived++;
+        pendingTcpGripForce = gripForce;
+        
+        if (enableDebugLogs)
+        {
+            Debug.Log($"🔥 TCP把持力指令受信: {gripForce:F2}N");
+        }
+        
+        // 現在TCP指令を待機中の場合、待機を解除
+        if (isWaitingForTcpCommand)
+        {
+            CompleteTcpCommandWait(false);
+        }
+    }
+    
+    /// <summary>
+    /// TCP指令の処理を更新
+    /// </summary>
+    void HandleTcpGripForceCommands()
+    {
+        if (!enableTcpGripForceControl) return;
+        
+        // TCP指令待機のタイムアウトチェック
+        if (isWaitingForTcpCommand)
+        {
+            float waitTime = Time.time - tcpCommandWaitStartTime;
+            if (waitTime > tcpCommandWaitTimeout)
+            {
+                CompleteTcpCommandWait(true); // タイムアウト
+            }
+        }
+    }
+    
+    /// <summary>
+    /// TCP指令の待機を開始
+    /// </summary>
+    void StartTcpCommandWait()
+    {
+        if (!enableTcpGripForceControl || !waitForTcpCommandBeforeStart) return;
+        
+        currentState = EpisodeState.WaitingForTcp;
+        isWaitingForTcpCommand = true;
+        tcpCommandWaitStartTime = Time.time;
+        
+        if (enableDebugLogs)
+        {
+            Debug.Log($"🔥 TCP把持力指令を待機中... (タイムアウト: {tcpCommandWaitTimeout}秒)");
+        }
+    }
+    
+    /// <summary>
+    /// TCP指令待機の完了
+    /// </summary>
+    void CompleteTcpCommandWait(bool wasTimeout)
+    {
+        isWaitingForTcpCommand = false;
+        
+        if (wasTimeout)
+        {
+            tcpTimeouts++;
+            if (enableDebugLogs)
+            {
+                Debug.LogWarning($"⏰ TCP指令待機タイムアウト (統計: {tcpTimeouts}回目)");
+            }
+        }
+        else
+        {
+            if (enableDebugLogs)
+            {
+                Debug.Log($"✅ TCP指令受信完了");
+            }
+        }
+    }
+    
+    /// <summary>
+    /// 把持力を決定して適用
+    /// TCP指令 > ランダム > デフォルトの優先順位
+    /// </summary>
+    void DetermineAndApplyGripForce()
+    {
+        float targetGripForce = 0f;
+        GripForceSource source = GripForceSource.Default;
+        
+        // 🔥 TCP指令が利用可能な場合は優先使用
+        if (enableTcpGripForceControl && useTcpForceWhenAvailable && pendingTcpGripForce.HasValue)
+        {
+            targetGripForce = pendingTcpGripForce.Value;
+            source = GripForceSource.Tcp;
+            tcpCommandsUsed++;
+            
+            // 使用済みTCP指令をクリア
+            pendingTcpGripForce = null;
+        }
+        // ランダム把持力が有効な場合
+        else if (enableRandomGripForce && gripForceController != null)
+        {
+            targetGripForce = Random.Range(minGripForce, maxGripForce);
+            source = GripForceSource.Random;
+        }
+        // デフォルト把持力
+        else if (gripForceController != null)
+        {
+            targetGripForce = gripForceController.baseGripForce;
+            source = GripForceSource.Default;
+        }
+        
+        // 把持力の適用
+        if (gripForceController != null && targetGripForce > 0)
+        {
+            currentEpisodeGripForce = targetGripForce;
+            gripForceController.baseGripForce = targetGripForce;
+            gripForceController.forceVariability = 0f; // 実験用
+            
+            // 統計に記録
+            usedGripForces.Add(targetGripForce);
+            gripForceSources.Add(source);
+            
+            // イベント発火
+            OnGripForceApplied?.Invoke(targetGripForce, source);
+            
+            if (logGripForceChanges)
+            {
+                string sourceText = source switch
+                {
+                    GripForceSource.Tcp => "🔥TCP指令",
+                    GripForceSource.Random => "🎲ランダム",
+                    GripForceSource.Default => "⚙️デフォルト",
+                    _ => "❓不明"
+                };
+                
+                Debug.Log($"{sourceText} 把持力設定: {targetGripForce:F2}N");
+                
+                // アルミ缶の変形閾値と比較
+                if (aluminumCan != null)
+                {
+                    float threshold = aluminumCan.deformationThreshold;
+                    bool willCrush = targetGripForce > threshold;
+                    Debug.Log($"   変形閾値: {threshold:F2}N -> {(willCrush ? "⚠️つぶれる可能性" : "✅安全範囲")}");
+                }
+            }
+        }
+        
+        currentGripForceSource = source;
+    }
+    
+    #endregion
     
     #region エピソード制御
     
@@ -209,11 +420,17 @@ public class AutoEpisodeManager : MonoBehaviour
         failedEpisodes = 0;
         totalEpisodeTime = 0f;
         
+        // 🔥 TCP統計のリセット
+        tcpCommandsReceived = 0;
+        tcpCommandsUsed = 0;
+        tcpTimeouts = 0;
+        
         if (enableDebugLogs)
         {
             Debug.Log("🚀 自動エピソード開始！");
             Debug.Log($"最大エピソード数: {maxEpisodesPerSession}");
             Debug.Log($"エピソード時間: {episodeDuration}秒");
+            Debug.Log($"🔥 TCP把持力制御: {(enableTcpGripForceControl ? "有効" : "無効")}");
         }
         
         StartCoroutine(ExecuteEpisodeLoop());
@@ -223,6 +440,7 @@ public class AutoEpisodeManager : MonoBehaviour
     {
         enableAutoEpisodes = false;
         currentState = EpisodeState.Finished;
+        isWaitingForTcpCommand = false;
         
         if (enableDebugLogs)
         {
@@ -237,6 +455,12 @@ public class AutoEpisodeManager : MonoBehaviour
     {
         while (enableAutoEpisodes && currentEpisodeNumber < maxEpisodesPerSession)
         {
+            // 🔥 TCP指令待機フェーズ（オプション）
+            if (enableTcpGripForceControl && waitForTcpCommandBeforeStart)
+            {
+                yield return StartCoroutine(WaitForTcpCommand());
+            }
+            
             // 新しいエピソード開始
             yield return StartCoroutine(StartNewEpisode());
             
@@ -261,6 +485,23 @@ public class AutoEpisodeManager : MonoBehaviour
         OnSessionCompleted?.Invoke();
     }
     
+    // 🔥 TCP指令待機のコルーチン
+    IEnumerator WaitForTcpCommand()
+    {
+        StartTcpCommandWait();
+        
+        while (isWaitingForTcpCommand && enableAutoEpisodes)
+        {
+            yield return new WaitForSeconds(0.1f);
+        }
+        
+        if (enableDebugLogs)
+        {
+            bool receivedCommand = pendingTcpGripForce.HasValue;
+            Debug.Log($"🔥 TCP指令待機完了: {(receivedCommand ? "指令受信" : "タイムアウト")}");
+        }
+    }
+    
     IEnumerator StartNewEpisode()
     {
         currentState = EpisodeState.Starting;
@@ -273,19 +514,20 @@ public class AutoEpisodeManager : MonoBehaviour
             initialCanPosition = aluminumCan.transform.position;
         }
         
-        // ランダム把持力の設定
-        if (enableRandomGripForce && gripForceController != null)
-        {
-            SetRandomGripForce();
-        }
+        // 🔥 把持力の決定と適用（TCP指令を優先）
+        DetermineAndApplyGripForce();
         
         if (enableDebugLogs)
         {
             Debug.Log($"📋 エピソード {currentEpisodeNumber} 開始");
-            if (enableRandomGripForce && gripForceController != null)
+            string sourceText = currentGripForceSource switch
             {
-                Debug.Log($"🎲 把持力: {currentEpisodeGripForce:F2}N");
-            }
+                GripForceSource.Tcp => "🔥TCP",
+                GripForceSource.Random => "🎲ランダム",
+                GripForceSource.Default => "⚙️デフォルト",
+                _ => "❓不明"
+            };
+            Debug.Log($"{sourceText} 把持力: {currentEpisodeGripForce:F2}N");
         }
         
         // A2Cクライアントにリセット通知
@@ -300,12 +542,12 @@ public class AutoEpisodeManager : MonoBehaviour
         // ロボット動作開始
         if (trajectoryPlanner != null)
         {
-            trajectoryPlanner.PublishJointAlminumCan(); // 正しいメソッド名
+            trajectoryPlanner.PublishJointAlminumCan();
         }
         
         OnEpisodeStarted?.Invoke(currentEpisodeNumber);
         
-        yield return new WaitForSeconds(0.5f); // 動作開始の安定化待機
+        yield return new WaitForSeconds(0.5f);
     }
     
     IEnumerator RunEpisode()
@@ -319,7 +561,6 @@ public class AutoEpisodeManager : MonoBehaviour
         {
             episodeTime = Time.time - episodeStartTime;
             
-            // エピソード終了条件をチェック
             episodeEnded = CheckEpisodeEndConditions();
             
             yield return new WaitForSeconds(completionCheckInterval);
@@ -339,7 +580,6 @@ public class AutoEpisodeManager : MonoBehaviour
         float episodeTime = Time.time - episodeStartTime;
         totalEpisodeTime += episodeTime;
         
-        // 成功/失敗の判定
         bool wasSuccessful = DetermineEpisodeSuccess();
         
         if (wasSuccessful)
@@ -347,23 +587,26 @@ public class AutoEpisodeManager : MonoBehaviour
         else
             failedEpisodes++;
         
-        // A2Cクライアントにエピソード終了通知
         if (a2cClient != null)
         {
             a2cClient.SendEpisodeEnd();
         }
         
-        // 統計表示
         if (enableDebugLogs)
         {
             float successRate = (float)successfulEpisodes / currentEpisodeNumber * 100f;
+            string sourceText = currentGripForceSource switch
+            {
+                GripForceSource.Tcp => "🔥TCP",
+                GripForceSource.Random => "🎲ランダム",
+                GripForceSource.Default => "⚙️デフォルト",
+                _ => "❓不明"
+            };
+            
             Debug.Log($"🏁 エピソード {currentEpisodeNumber} 完了");
             Debug.Log($"   結果: {(wasSuccessful ? "✅成功" : "❌失敗")}");
             Debug.Log($"   時間: {episodeTime:F2}秒");
-            if (enableRandomGripForce && currentEpisodeGripForce > 0)
-            {
-                Debug.Log($"   把持力: {currentEpisodeGripForce:F2}N");
-            }
+            Debug.Log($"   把持力: {currentEpisodeGripForce:F2}N ({sourceText})");
             Debug.Log($"   成功率: {successRate:F1}% ({successfulEpisodes}/{currentEpisodeNumber})");
         }
         
@@ -381,22 +624,18 @@ public class AutoEpisodeManager : MonoBehaviour
             Debug.Log("🔄 次のエピソードに向けてリセット中...");
         }
         
-        // システムリセット
         if (trajectoryPlanner != null)
         {
             trajectoryPlanner.ResetToInitialPositions();
         }
         
-        // アルミ缶リセット
         if (aluminumCan != null)
         {
             aluminumCan.ResetCan();
         }
         
-        // リセット完了まで待機
         yield return new WaitForSeconds(resetDelay);
         
-        // ロボット位置をリセット
         if (niryoOneRobot != null)
         {
             lastRobotPosition = niryoOneRobot.transform.position;
@@ -410,11 +649,11 @@ public class AutoEpisodeManager : MonoBehaviour
     
     #endregion
     
-    #region 状態判定
+    #region 状態判定（既存のメソッドは変更なし）
     
     void UpdateEpisodeState()
     {
-        // 現在のステートに応じた処理は ExecuteEpisodeLoop で管理
+        // ExecuteEpisodeLoop で管理
     }
     
     void UpdateMovementDetection()
@@ -439,58 +678,55 @@ public class AutoEpisodeManager : MonoBehaviour
     
     bool CheckEpisodeEndConditions()
     {
-        // 1. アルミ缶がつぶれた場合
         if (aluminumCan != null && aluminumCan.IsBroken)
         {
             return true;
         }
         
-        // 2. ロボットが長時間停止している場合
         if (!isRobotMoving && (Time.time - lastMovementTime) > stoppedTimeThreshold)
         {
             return true;
         }
-        
-        // 3. その他のタスク完了条件
-        // TODO: 必要に応じて追加の完了条件を実装
         
         return false;
     }
         
     public bool DetermineEpisodeSuccess()
     {
-        // 基本条件：アルミ缶がつぶれていない
         if (aluminumCan == null || aluminumCan.IsBroken)
         {
             return false;
         }
         
-        // 追加条件1：グリッパーが物体と接触している
         bool hasValidContact = false;
         if (gripperInterface != null)
         {
             hasValidContact = gripperInterface.HasValidContact();
         }
         
-        // 追加条件2：物体が一定高さまで持ち上げられている
         bool isLifted = false;
         if (aluminumCan != null)
         {
-            // ROSコードでは0.10m持ち上げるので、その80%程度を成功基準とする
             float liftHeight = aluminumCan.transform.position.y - initialCanPosition.y;
-            isLifted = liftHeight > 0.08f; // 8cm以上持ち上げられている
+            isLifted = liftHeight > 0.08f;
         }
         
-        // 追加条件3：物体が落下していない（速度チェック）
         bool notFalling = true;
         Rigidbody canRigidbody = aluminumCan.GetComponent<Rigidbody>();
         if (canRigidbody != null)
         {
-            notFalling = canRigidbody.velocity.y > -0.3f; // 下向き速度が0.3m/s未満
+            notFalling = canRigidbody.velocity.y > -0.3f;
         }
         
-        // 改善された成功条件
-        bool success = !aluminumCan.IsBroken && hasValidContact && isLifted && notFalling;
+        // 缶が破損していないかの追加チェック（既存のGetCurrentStateを使用）
+        bool notDeformed = true;
+        if (aluminumCan != null)
+        {
+            var canState = aluminumCan.GetCurrentState();
+            notDeformed = !canState.isBroken && canState.deformation < 0.5f; // 変形が50%未満
+        }
+        
+        bool success = !aluminumCan.IsBroken && hasValidContact && isLifted && notFalling && notDeformed;
         
         if (enableDebugLogs)
         {
@@ -499,6 +735,7 @@ public class AutoEpisodeManager : MonoBehaviour
             Debug.Log($"   接触維持: {hasValidContact}");
             Debug.Log($"   持ち上げ完了: {isLifted}");
             Debug.Log($"   落下していない: {notFalling}");
+            Debug.Log($"   変形許容範囲: {notDeformed}");
             Debug.Log($"   最終判定: {(success ? "✅成功" : "❌失敗")}");
         }
         
@@ -510,7 +747,6 @@ public class AutoEpisodeManager : MonoBehaviour
     
     void UpdateDebugDisplay()
     {
-        // この関数は Update で呼ばれるため、フレームレート考慮
         if (Time.frameCount % 60 == 0) // 1秒ごとに更新
         {
             // 統計情報のログ出力は必要に応じて
@@ -532,14 +768,31 @@ public class AutoEpisodeManager : MonoBehaviour
         Debug.Log($"平均エピソード時間: {avgEpisodeTime:F2}秒");
         Debug.Log($"総実行時間: {totalEpisodeTime:F2}秒");
         
+        // 🔥 TCP把持力統計
+        if (enableTcpGripForceControl)
+        {
+            float tcpUsageRate = tcpCommandsReceived > 0 ? (float)tcpCommandsUsed / tcpCommandsReceived * 100f : 0f;
+            Debug.Log($"🔥 TCP把持力統計:");
+            Debug.Log($"- 受信指令数: {tcpCommandsReceived}");
+            Debug.Log($"- 使用指令数: {tcpCommandsUsed}");
+            Debug.Log($"- 使用率: {tcpUsageRate:F1}%");
+            Debug.Log($"- タイムアウト回数: {tcpTimeouts}");
+        }
+        
         // 把持力統計
-        if (enableRandomGripForce && usedGripForces.Count > 0)
+        if (usedGripForces.Count > 0)
         {
             var gripStats = GetGripForceStatistics();
             Debug.Log($"把持力統計:");
             Debug.Log($"- 平均把持力: {gripStats.averageForce:F2}N");
             Debug.Log($"- 使用範囲: {gripStats.minUsedForce:F2}N - {gripStats.maxUsedForce:F2}N");
             Debug.Log($"- 設定回数: {gripStats.totalForceSettings}回");
+            
+            // 🔥 ソース別統計
+            var sourceStats = GetGripForceSourceStatistics();
+            Debug.Log($"- TCP指令使用: {sourceStats.tcpCount}回 ({sourceStats.tcpPercentage:F1}%)");
+            Debug.Log($"- ランダム使用: {sourceStats.randomCount}回 ({sourceStats.randomPercentage:F1}%)");
+            Debug.Log($"- デフォルト使用: {sourceStats.defaultCount}回 ({sourceStats.defaultPercentage:F1}%)");
         }
         
         Debug.Log(new string('=', 50));
@@ -573,6 +826,14 @@ public class AutoEpisodeManager : MonoBehaviour
             y += lineHeight;
         }
         
+        // 🔥 TCP指令待機状態の表示
+        if (currentState == EpisodeState.WaitingForTcp)
+        {
+            float waitTime = Time.time - tcpCommandWaitStartTime;
+            GUI.Label(new Rect(10, y, 400, lineHeight), $"🔥 TCP指令待機中: {waitTime:F1}s / {tcpCommandWaitTimeout:F1}s", style);
+            y += lineHeight;
+        }
+        
         if (currentEpisodeNumber > 0)
         {
             float successRate = (float)successfulEpisodes / currentEpisodeNumber * 100f;
@@ -581,9 +842,23 @@ public class AutoEpisodeManager : MonoBehaviour
         }
         
         // 把持力情報
-        if (enableRandomGripForce && currentEpisodeGripForce > 0)
+        if (currentEpisodeGripForce > 0)
         {
-            GUI.Label(new Rect(10, y, 400, lineHeight), $"現在の把持力: {currentEpisodeGripForce:F1}N", style);
+            string sourceText = currentGripForceSource switch
+            {
+                GripForceSource.Tcp => "🔥TCP",
+                GripForceSource.Random => "🎲ランダム",
+                GripForceSource.Default => "⚙️デフォルト",
+                _ => "❓"
+            };
+            GUI.Label(new Rect(10, y, 400, lineHeight), $"把持力: {currentEpisodeGripForce:F1}N ({sourceText})", style);
+            y += lineHeight;
+        }
+        
+        // 🔥 TCP統計表示
+        if (enableTcpGripForceControl)
+        {
+            GUI.Label(new Rect(10, y, 400, lineHeight), $"🔥 TCP: 受信{tcpCommandsReceived} / 使用{tcpCommandsUsed} / TO{tcpTimeouts}", style);
             y += lineHeight;
         }
         
@@ -598,38 +873,7 @@ public class AutoEpisodeManager : MonoBehaviour
     
     #endregion
     
-    #region 把持力ランダム化
-    
-    /// <summary>
-    /// ランダムな把持力を設定
-    /// </summary>
-    void SetRandomGripForce()
-    {
-        if (gripForceController == null) return;
-        
-        // 範囲内でランダムに生成
-        currentEpisodeGripForce = Random.Range(minGripForce, maxGripForce);
-        gripForceController.baseGripForce = currentEpisodeGripForce;
-
-            // 🔧 追加：変動も無効化
-        gripForceController.forceVariability = 0f;  // 実験用
-        
-        // 統計に追加
-        usedGripForces.Add(currentEpisodeGripForce);
-        
-        if (logGripForceChanges)
-        {
-            Debug.Log($"🎲 把持力設定: {currentEpisodeGripForce:F2}N (範囲: {minGripForce:F1}-{maxGripForce:F1}N)");
-            
-            // アルミ缶の変形閾値と比較
-            if (aluminumCan != null)
-            {
-                float threshold = aluminumCan.deformationThreshold;
-                bool willCrush = currentEpisodeGripForce > threshold;
-                Debug.Log($"   変形閾値: {threshold:F2}N -> {(willCrush ? "⚠️つぶれる可能性" : "✅安全範囲")}");
-            }
-        }
-    }
+    #region 把持力制御（既存メソッドの拡張）
     
     /// <summary>
     /// 把持力統計の取得
@@ -665,6 +909,50 @@ public class AutoEpisodeManager : MonoBehaviour
     }
     
     /// <summary>
+    /// 🔥 新規追加：把持力ソース別統計の取得
+    /// </summary>
+    public GripForceSourceStatistics GetGripForceSourceStatistics()
+    {
+        if (gripForceSources.Count == 0)
+        {
+            return new GripForceSourceStatistics();
+        }
+        
+        int tcpCount = 0;
+        int randomCount = 0;
+        int defaultCount = 0;
+        
+        foreach (var source in gripForceSources)
+        {
+            switch (source)
+            {
+                case GripForceSource.Tcp:
+                    tcpCount++;
+                    break;
+                case GripForceSource.Random:
+                    randomCount++;
+                    break;
+                case GripForceSource.Default:
+                    defaultCount++;
+                    break;
+            }
+        }
+        
+        int total = gripForceSources.Count;
+        
+        return new GripForceSourceStatistics
+        {
+            tcpCount = tcpCount,
+            randomCount = randomCount,
+            defaultCount = defaultCount,
+            tcpPercentage = (float)tcpCount / total * 100f,
+            randomPercentage = (float)randomCount / total * 100f,
+            defaultPercentage = (float)defaultCount / total * 100f,
+            totalCount = total
+        };
+    }
+    
+    /// <summary>
     /// 把持力範囲の動的調整
     /// </summary>
     public void AdjustGripForceRange(float newMin, float newMax)
@@ -681,6 +969,32 @@ public class AutoEpisodeManager : MonoBehaviour
         if (enableDebugLogs)
         {
             Debug.Log($"把持力範囲を調整: {minGripForce:F1}N - {maxGripForce:F1}N");
+        }
+    }
+    
+    /// <summary>
+    /// 🔥 新規追加：TCP制御設定の動的変更
+    /// </summary>
+    public void SetTcpGripForceControlEnabled(bool enabled)
+    {
+        enableTcpGripForceControl = enabled;
+        
+        if (enableDebugLogs)
+        {
+            Debug.Log($"🔥 TCP把持力制御: {(enabled ? "有効化" : "無効化")}");
+        }
+    }
+    
+    /// <summary>
+    /// 🔥 新規追加：TCP待機タイムアウトの設定
+    /// </summary>
+    public void SetTcpCommandWaitTimeout(float timeoutSeconds)
+    {
+        tcpCommandWaitTimeout = Mathf.Clamp(timeoutSeconds, 1f, 60f);
+        
+        if (enableDebugLogs)
+        {
+            Debug.Log($"🔥 TCP待機タイムアウト設定: {tcpCommandWaitTimeout:F1}秒");
         }
     }
     
@@ -713,6 +1027,17 @@ public class AutoEpisodeManager : MonoBehaviour
     }
     
     /// <summary>
+    /// 🔥 新規追加：TCP指令待機を強制終了
+    /// </summary>
+    public void ForceEndTcpWait()
+    {
+        if (isWaitingForTcpCommand)
+        {
+            CompleteTcpCommandWait(true);
+        }
+    }
+    
+    /// <summary>
     /// 統計情報の取得
     /// </summary>
     public EpisodeStatistics GetStatistics()
@@ -725,6 +1050,23 @@ public class AutoEpisodeManager : MonoBehaviour
             successRate = currentEpisodeNumber > 0 ? (float)successfulEpisodes / currentEpisodeNumber * 100f : 0f,
             averageEpisodeTime = currentEpisodeNumber > 0 ? totalEpisodeTime / currentEpisodeNumber : 0f,
             totalTime = totalEpisodeTime
+        };
+    }
+    
+    /// <summary>
+    /// 🔥 新規追加：TCP統計情報の取得
+    /// </summary>
+    public TcpStatistics GetTcpStatistics()
+    {
+        return new TcpStatistics
+        {
+            commandsReceived = tcpCommandsReceived,
+            commandsUsed = tcpCommandsUsed,
+            timeouts = tcpTimeouts,
+            usageRate = tcpCommandsReceived > 0 ? (float)tcpCommandsUsed / tcpCommandsReceived * 100f : 0f,
+            isEnabled = enableTcpGripForceControl,
+            hasPendingCommand = pendingTcpGripForce.HasValue,
+            pendingForceValue = pendingTcpGripForce ?? 0f
         };
     }
     
@@ -757,4 +1099,34 @@ public class GripForceStatistics
     public float maxUsedForce;
     public int totalForceSettings;
     public float currentForce;
+}
+
+/// <summary>
+/// 🔥 新規追加：把持力ソース別統計
+/// </summary>
+[System.Serializable]
+public class GripForceSourceStatistics
+{
+    public int tcpCount;
+    public int randomCount;
+    public int defaultCount;
+    public float tcpPercentage;
+    public float randomPercentage;
+    public float defaultPercentage;
+    public int totalCount;
+}
+
+/// <summary>
+/// 🔥 新規追加：TCP通信統計
+/// </summary>
+[System.Serializable]
+public class TcpStatistics
+{
+    public int commandsReceived;
+    public int commandsUsed;
+    public int timeouts;
+    public float usageRate;
+    public bool isEnabled;
+    public bool hasPendingCommand;
+    public float pendingForceValue;
 }

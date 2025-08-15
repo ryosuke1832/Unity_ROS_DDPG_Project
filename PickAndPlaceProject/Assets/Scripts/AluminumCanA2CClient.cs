@@ -1,76 +1,57 @@
+// AluminumCanA2CClient.cs の改良版
+// AutoEpisodeManagerとの連携を強化し、把持力指令の受信・転送機能を追加
+
 using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Net.Sockets;
 using System.Text;
-using UnityEngine;
 using System.Threading;
-using System.Collections;
-using System.Collections.Generic;
+using UnityEngine;
 
-[System.Serializable]
-public class CanStateMessage
-{
-    public string type = "can_state";
-    public bool is_crushed;
-    public string grasp_result;
-    public float current_force;
-    public float accumulated_force;
-    public float timestamp;
-}
-
-[System.Serializable]
-public class SimpleMessage
-{
-    public string type;
-    public float timestamp;
-}
-
-[System.Serializable]
-public class A2CResponse
-{
-    public string type;
-    public float recommended_force;
-    public float calculated_reward;
-    public float timestamp;
-    public string message;
-}
-
-[System.Serializable]
-public class GripForceCommand
-{
-    public string type;
-    public float target_force;
-    public string execution_mode;
-    public float duration;
-    public float timestamp;
-}
-
+/// <summary>
+/// A2C強化学習サーバーとの通信クライアント
+/// AutoEpisodeManagerとの連携により把持力指令を受信・転送
+/// </summary>
 public class AluminumCanA2CClient : MonoBehaviour
 {
-    [Header("接続設定")]
-    public string serverHost = "localhost";
+    [Header("🔗 接続設定")]
+    public string serverHost = "127.0.0.1";
     public int serverPort = 12345;
+    public bool autoConnect = true;
+    public bool autoReconnect = true;
+    [Range(1f, 10f)]
+    public float reconnectInterval = 3f;
     
-    [Header("コンポーネント参照")]
-    public IntegratedAluminumCan aluminumCan;
+    [Header("📡 通信設定")]
+    [Range(0.1f, 5f)]
+    public float sendInterval = 1f;
+    public bool enableCompression = false;
+    public int maxRetries = 3;
     
-    [Header("送信設定")]
-    [Range(0.1f, 2.0f)]
-    public float sendInterval = 0.5f;
+    [Header("🔥 把持力指令設定")]
+    public bool enableGripForceReceiving = true;
+    public bool enableGripForceForwarding = true;
+    [Range(1f, 30f)]
+    public float maxGripForceValue = 30f;
+    [Range(0.1f, 5f)]
+    public float minGripForceValue = 0.1f;
     
-    [Header("把持力指令待機設定")]
-    public bool waitForGripForceCommand = true;  // 新規追加：把持力指令待機を有効にするか
-    [Range(1f, 60f)]
-    public float commandWaitTimeout = 30f;       // 新規追加：待機タイムアウト時間
-    public bool showWaitingStatus = true;        // 新規追加：待機状態をGUIに表示するか
+    [Header("🎯 AutoEpisodeManager 連携")]
+    public AutoEpisodeManager episodeManager;
+    public bool autoFindEpisodeManager = true;
     
-    [Header("デバッグ")]
+    [Header("🔍 デバッグ")]
     public bool enableDebugLogs = true;
-    public bool enableVerboseReceiveLog = true;
-    
-    [Header("GUI表示設定")]
+    public bool enableVerboseReceiveLog = false;
     public bool showGripForceGUI = true;
-    public Vector2 guiPosition = new Vector2(10, 10);
-    public Vector2 guiSize = new Vector2(350, 200);  // サイズを少し大きく
+    public Vector2 guiPosition = new Vector2(10, 300);
+    public Vector2 guiSize = new Vector2(300, 200);
+    
+    [Header("🎮 ゲームオブジェクト参照")]
+    public IntegratedAluminumCan aluminumCan;
+    public SimpleGripForceController gripForceController;
+    public GripperTargetInterface gripperInterface;
     
     // 通信関連
     private TcpClient tcpClient;
@@ -78,79 +59,54 @@ public class AluminumCanA2CClient : MonoBehaviour
     private Thread communicationThread;
     private bool isConnected = false;
     private bool shouldStop = false;
+    private float lastSendTime = 0f;
+    private int retryCount = 0;
     
-    // メインスレッドでの処理用キュー
+    // メッセージキュー（スレッドセーフ）
     private Queue<string> messageQueue = new Queue<string>();
     private readonly object queueLock = new object();
     
-    // 状態管理
-    private bool lastCrushedState = false;
-    private float lastSendTime = 0f;
-    private bool hasEvaluatedThisEpisode = false;
+    // エピソード制御
     private bool isEpisodeActive = false;
-    private float lastForce = 0f;
-    
-    // 🔥 新規追加：把持力指令待機システム
-    private bool isWaitingForGripForceCommand = false;
-    private float waitStartTime = 0f;
-    private bool hasReceivedCommandThisEpisode = false;
+    private bool hasEvaluatedThisEpisode = false;
     private int currentEpisodeNumber = 0;
     
-    // 把持力表示用の変数
-    private float receivedGripForce = 0f;
-    private string lastExecutionMode = "";
-    private float lastDuration = 0f;
-    private string lastReceivedTime = "";
-    private int totalCommandsReceived = 0;
-    private bool hasReceivedCommand = false;
+    // 🔥 把持力指令関連
+    private Queue<float> gripForceCommandQueue = new Queue<float>();
+    private readonly object gripForceQueueLock = new object();
+    private float? lastReceivedGripForce = null;
+    private DateTime lastGripForceReceiveTime = DateTime.MinValue;
     
-    // デバッグ用統計情報
+    // 統計
     private int totalMessagesReceived = 0;
     private int gripForceCommandsReceived = 0;
-    private int episodesWithCommands = 0;
-    private int episodesWithTimeout = 0;
+    private int gripForceCommandsForwarded = 0;
+    private int invalidGripForceCommands = 0;
+    private int totalMessagesSent = 0;
+    private int connectionAttempts = 0;
     
     // イベント
-    public event System.Action<bool> OnConnectionChanged;
-    public event System.Action<float> OnRecommendedForceReceived;
-    public event System.Action<float> OnRewardReceived;
-    public event System.Action<float> OnGripForceCommandReceived;
-    public event System.Action OnGripForceCommandWaitStarted;    // 新規追加
-    public event System.Action OnGripForceCommandWaitCompleted; // 新規追加
-    public event System.Action OnGripForceCommandTimeout;       // 新規追加
+    public System.Action<bool> OnConnectionChanged;
+    public System.Action<float> OnGripForceCommandReceived; // 🔥 新規追加
+    public System.Action<string> OnMessageReceived;
+    public System.Action<int> OnEpisodeStateChanged;
     
     void Start()
     {
-        if (aluminumCan == null)
-        {
-            aluminumCan = FindObjectOfType<IntegratedAluminumCan>();
-        }
+        InitializeComponents();
         
-        if (aluminumCan == null)
+        if (autoConnect)
         {
-            Debug.LogError("❌ IntegratedAluminumCanが見つかりません！");
-            return;
+            ConnectToA2CServer();
         }
-        
-        ConnectToA2CServer();
     }
     
     void Update()
     {
-        // メインスレッドでキューからメッセージを処理
         ProcessMessageQueue();
+        ProcessGripForceCommands(); // 🔥 新規追加
         
-        // 🔥 新規追加：把持力指令待機のタイムアウトチェック
-        CheckGripForceCommandTimeout();
-        
-        // エピソードがアクティブでない場合は送信しない
-        if (!isEpisodeActive)
-        {
-            return;
-        }
-        
-        // 評価済みの場合は送信停止
-        if (hasEvaluatedThisEpisode)
+        if (!isEpisodeActive || hasEvaluatedThisEpisode)
         {
             return;
         }
@@ -160,170 +116,326 @@ public class AluminumCanA2CClient : MonoBehaviour
             SendCanState();
             lastSendTime = Time.time;
         }
-    }
-    
-    // 🔥 新規追加：把持力指令待機のタイムアウトチェック
-    void CheckGripForceCommandTimeout()
-    {
-        if (!isWaitingForGripForceCommand) return;
         
-        if (Time.time - waitStartTime > commandWaitTimeout)
+        // 自動再接続
+        if (!isConnected && autoReconnect && Time.time - lastSendTime > reconnectInterval)
         {
-            Debug.LogWarning($"⏰ 把持力指令待機タイムアウト（{commandWaitTimeout}秒）- エピソードを続行");
-            CompleteGripForceCommandWait(true);
+            AttemptReconnection();
         }
     }
     
-    // メインスレッドでのメッセージ処理
-    void ProcessMessageQueue()
+    #region 初期化
+    
+    void InitializeComponents()
     {
-        lock (queueLock)
+        // コンポーネントの自動検索
+        if (aluminumCan == null)
+            aluminumCan = FindObjectOfType<IntegratedAluminumCan>();
+            
+        if (gripForceController == null)
+            gripForceController = FindObjectOfType<SimpleGripForceController>();
+            
+        if (gripperInterface == null)
+            gripperInterface = FindObjectOfType<GripperTargetInterface>();
+        
+        // 🔥 AutoEpisodeManagerの自動検索と連携設定
+        if (autoFindEpisodeManager && episodeManager == null)
         {
-            while (messageQueue.Count > 0)
-            {
-                string message = messageQueue.Dequeue();
-                ProcessA2CResponse(message);
-            }
+            episodeManager = FindObjectOfType<AutoEpisodeManager>();
+        }
+        
+        SetupEpisodeManagerIntegration();
+        
+        if (enableDebugLogs)
+        {
+            Debug.Log("=== AluminumCanA2CClient 初期化 ===");
+            Debug.Log($"AluminumCan: {(aluminumCan != null ? "✅" : "❌")}");
+            Debug.Log($"GripForceController: {(gripForceController != null ? "✅" : "❌")}");
+            Debug.Log($"GripperInterface: {(gripperInterface != null ? "✅" : "❌")}");
+            Debug.Log($"🔥 EpisodeManager: {(episodeManager != null ? "✅連携設定" : "❌未設定")}");
+            Debug.Log($"🔥 把持力指令受信: {(enableGripForceReceiving ? "有効" : "無効")}");
+            Debug.Log($"🔥 把持力指令転送: {(enableGripForceForwarding ? "有効" : "無効")}");
         }
     }
     
-    #region GUI表示
-    
-    void OnGUI()
+    // 🔥 AutoEpisodeManagerとの連携設定
+    void SetupEpisodeManagerIntegration()
     {
-        if (!showGripForceGUI) return;
+        if (episodeManager == null) return;
         
-        // GUI領域の設定
-        GUILayout.BeginArea(new Rect(guiPosition.x, guiPosition.y, guiSize.x, guiSize.y));
+        // エピソード開始/終了イベントの購読
+        episodeManager.OnEpisodeStarted += OnEpisodeStarted;
+        episodeManager.OnEpisodeCompleted += OnEpisodeCompleted;
+        episodeManager.OnSessionCompleted += OnSessionCompleted;
         
-        // 背景ボックス
-        GUI.Box(new Rect(0, 0, guiSize.x, guiSize.y), "");
-        
-        GUILayout.BeginVertical();
-        
-        // タイトル
-        GUILayout.Label("🎯 Python把持力指令", new GUIStyle(GUI.skin.label) 
-        { 
-            fontSize = 16, 
-            fontStyle = FontStyle.Bold,
-            normal = { textColor = Color.white }
-        });
-        
-        GUILayout.Space(5);
-        
-        // 接続状態
-        string connectionStatus = isConnected ? "✅ 接続中" : "❌ 切断";
-        Color connectionColor = isConnected ? Color.green : Color.red;
-        GUILayout.Label($"接続状態: {connectionStatus}", new GUIStyle(GUI.skin.label) 
-        { 
-            normal = { textColor = connectionColor }
-        });
-        
-        // 🔥 新規追加：待機状態の表示
-        if (showWaitingStatus && waitForGripForceCommand)
+        if (enableDebugLogs)
         {
-            if (isWaitingForGripForceCommand)
-            {
-                float elapsedTime = Time.time - waitStartTime;
-                float remainingTime = commandWaitTimeout - elapsedTime;
-                
-                GUILayout.Label($"⏳ 把持力指令待機中... ({remainingTime:F1}秒)", new GUIStyle(GUI.skin.label) 
-                { 
-                    normal = { textColor = Color.yellow },
-                    fontStyle = FontStyle.Bold
-                });
-            }
-            else
-            {
-                GUILayout.Label("✅ 指令受信済み", new GUIStyle(GUI.skin.label) 
-                { 
-                    normal = { textColor = Color.green }
-                });
-            }
+            Debug.Log("🔥 AutoEpisodeManagerとの連携を設定しました");
         }
-        
-        // 統計情報
-        GUILayout.Label($"総受信: {totalMessagesReceived} / 把持力: {gripForceCommandsReceived}");
-        GUILayout.Label($"エピソード: {currentEpisodeNumber} / 指令有: {episodesWithCommands} / タイムアウト: {episodesWithTimeout}");
-        
-        GUILayout.Space(5);
-        
-        // 受信した把持力の表示
-        if (hasReceivedCommand)
-        {
-            GUILayout.Label($"受信把持力: {receivedGripForce:F1} N", new GUIStyle(GUI.skin.label) 
-            { 
-                fontSize = 14,
-                fontStyle = FontStyle.Bold,
-                normal = { textColor = Color.cyan }
-            });
-            
-            GUILayout.Label($"実行モード: {lastExecutionMode}");
-            
-            if (lastExecutionMode == "gradual")
-            {
-                GUILayout.Label($"継続時間: {lastDuration:F1} 秒");
-            }
-            
-            GUILayout.Label($"受信時刻: {lastReceivedTime}");
-        }
-        else
-        {
-            GUILayout.Label("把持力指令待機中...", new GUIStyle(GUI.skin.label) 
-            { 
-                normal = { textColor = Color.yellow }
-            });
-        }
-        
-        GUILayout.Space(5);
-        
-        // 現在の缶の状態（参考用）
-        if (aluminumCan != null)
-        {
-            var state = aluminumCan.GetCurrentState();
-            GUILayout.Label($"現在力: {state.appliedForce:F1} N");
-            
-            string statusText = state.isBroken ? "🔴 つぶれ" : "🟢 正常";
-            Color statusColor = state.isBroken ? Color.red : Color.green;
-            GUILayout.Label($"缶状態: {statusText}", new GUIStyle(GUI.skin.label) 
-            { 
-                normal = { textColor = statusColor }
-            });
-        }
-        
-        GUILayout.EndVertical();
-        GUILayout.EndArea();
     }
     
     #endregion
     
-    #region 接続管理
+    #region エピソード連携イベント
+    
+    void OnEpisodeStarted(int episodeNumber)
+    {
+        currentEpisodeNumber = episodeNumber;
+        isEpisodeActive = true;
+        hasEvaluatedThisEpisode = false;
+        
+        OnEpisodeStateChanged?.Invoke(episodeNumber);
+        
+        if (enableDebugLogs)
+        {
+            Debug.Log($"📋 エピソード {episodeNumber} 開始通知受信");
+        }
+    }
+    
+    void OnEpisodeCompleted(int episodeNumber, bool wasSuccessful)
+    {
+        isEpisodeActive = false;
+        hasEvaluatedThisEpisode = true;
+        
+        if (enableDebugLogs)
+        {
+            Debug.Log($"🏁 エピソード {episodeNumber} 完了通知受信: {(wasSuccessful ? "成功" : "失敗")}");
+        }
+    }
+    
+    void OnSessionCompleted()
+    {
+        isEpisodeActive = false;
+        
+        if (enableDebugLogs)
+        {
+            Debug.Log("🏆 セッション完了通知受信");
+            ShowStatistics();
+        }
+    }
+    
+    #endregion
+    
+    #region 🔥 把持力指令処理
+    
+    /// <summary>
+    /// 把持力指令キューの処理
+    /// </summary>
+    void ProcessGripForceCommands()
+    {
+        if (!enableGripForceReceiving) return;
+        
+        lock (gripForceQueueLock)
+        {
+            while (gripForceCommandQueue.Count > 0)
+            {
+                float gripForce = gripForceCommandQueue.Dequeue();
+                ProcessGripForceCommand(gripForce);
+            }
+        }
+    }
+    
+    /// <summary>
+    /// 個別の把持力指令を処理
+    /// </summary>
+    void ProcessGripForceCommand(float gripForce)
+    {
+        Debug.Log($"🔥 把持力指令処理開始: {gripForce:F2}N");
+        
+        // 値の妥当性チェック
+        if (gripForce < minGripForceValue || gripForce > maxGripForceValue)
+        {
+            invalidGripForceCommands++;
+            
+            Debug.LogWarning($"⚠️ 無効な把持力指令: {gripForce:F2}N (範囲: {minGripForceValue:F1}-{maxGripForceValue:F1}N)");
+            return;
+        }
+        
+        lastReceivedGripForce = gripForce;
+        lastGripForceReceiveTime = DateTime.Now;
+        gripForceCommandsReceived++;
+        
+        Debug.Log($"🔥 把持力指令受信完了: {gripForce:F2}N (受信数: {gripForceCommandsReceived})");
+        
+        // イベント発火
+        OnGripForceCommandReceived?.Invoke(gripForce);
+        Debug.Log($"🔥 イベント発火完了");
+        
+        // 🔥 AutoEpisodeManagerに転送
+        if (enableGripForceForwarding && episodeManager != null)
+        {
+            episodeManager.OnTcpGripForceCommandReceived(gripForce);
+            gripForceCommandsForwarded++;
+            
+            Debug.Log($"🔥 把持力指令転送完了: {gripForce:F2}N -> AutoEpisodeManager (転送数: {gripForceCommandsForwarded})");
+        }
+        else
+        {
+            if (!enableGripForceForwarding)
+            {
+                Debug.LogWarning($"⚠️ 把持力転送が無効化されています");
+            }
+            if (episodeManager == null)
+            {
+                Debug.LogWarning($"⚠️ EpisodeManagerが設定されていません");
+            }
+        }
+        
+        Debug.Log($"🔥 把持力指令処理完了: {gripForce:F2}N");
+    }
+    
+    /// <summary>
+    /// 受信したメッセージから把持力指令を抽出
+    /// </summary>
+    bool TryParseGripForceCommand(string message, out float gripForce)
+    {
+        gripForce = 0f;
+        
+        // 🔥 新しいJSON形式への対応: {"type": "grip_force_command", "target_force": 10.0, ...}
+        try
+        {
+            if (message.Contains("grip_force_command") && message.Contains("target_force"))
+            {
+                // target_forceの値を抽出
+                int targetForceIndex = message.IndexOf("target_force");
+                if (targetForceIndex >= 0)
+                {
+                    // "target_force": の後の値を取得
+                    int colonIndex = message.IndexOf(":", targetForceIndex);
+                    if (colonIndex >= 0)
+                    {
+                        // コロンの後から次のカンマまたは}まで
+                        string remaining = message.Substring(colonIndex + 1);
+                        int endIndex = remaining.IndexOfAny(new char[] { ',', '}' });
+                        if (endIndex >= 0)
+                        {
+                            string valueStr = remaining.Substring(0, endIndex).Trim();
+                            if (float.TryParse(valueStr, out gripForce))
+                            {
+                                if (enableDebugLogs)
+                                {
+                                    Debug.Log($"🔥 JSON形式の把持力指令解析成功: {gripForce:F2}N");
+                                }
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            if (enableDebugLogs)
+            {
+                Debug.LogWarning($"JSON把持力指令解析エラー: {ex.Message}");
+            }
+        }
+        
+        // 従来のテキスト形式への対応: "GRIP_FORCE:15.5" または "grip_force:15.5"
+        string[] patterns = { "GRIP_FORCE:", "grip_force:", "GripForce:", "gripforce:" };
+        
+        foreach (string pattern in patterns)
+        {
+            if (message.StartsWith(pattern, StringComparison.OrdinalIgnoreCase))
+            {
+                string valueStr = message.Substring(pattern.Length).Trim();
+                
+                if (float.TryParse(valueStr, out gripForce))
+                {
+                    if (enableDebugLogs)
+                    {
+                        Debug.Log($"🔥 テキスト形式の把持力指令解析成功: {gripForce:F2}N");
+                    }
+                    return true;
+                }
+            }
+        }
+        
+        // 旧JSON形式の試行: {"grip_force": 15.5}
+        try
+        {
+            if (message.Contains("grip_force") && message.Contains("{") && message.Contains("}"))
+            {
+                // 簡易JSON解析（JsonUtilityは使用しないで手動解析）
+                int startIndex = message.IndexOf("grip_force") + "grip_force".Length;
+                string remaining = message.Substring(startIndex);
+                
+                int colonIndex = remaining.IndexOf(':');
+                if (colonIndex >= 0)
+                {
+                    string valueStr = remaining.Substring(colonIndex + 1);
+                    valueStr = valueStr.Trim().TrimStart('"').TrimEnd('"', '}', ',', ' ');
+                    
+                    if (float.TryParse(valueStr, out gripForce))
+                    {
+                        if (enableDebugLogs)
+                        {
+                            Debug.Log($"🔥 旧JSON形式の把持力指令解析成功: {gripForce:F2}N");
+                        }
+                        return true;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            if (enableDebugLogs)
+            {
+                Debug.LogWarning($"旧JSON解析エラー: {ex.Message}");
+            }
+        }
+        
+        return false;
+    }
+    
+    #endregion
+    
+    #region 通信処理
     
     void ConnectToA2CServer()
     {
         try
         {
+            connectionAttempts++;
             tcpClient = new TcpClient(serverHost, serverPort);
             stream = tcpClient.GetStream();
             isConnected = true;
+            retryCount = 0;
             
             OnConnectionChanged?.Invoke(true);
             
             if (enableDebugLogs)
-                Debug.Log("✅ A2Cサーバーに接続しました");
+                Debug.Log($"✅ A2Cサーバーに接続しました (試行回数: {connectionAttempts})");
             
             // 通信スレッド開始
             communicationThread = new Thread(CommunicationLoop);
             communicationThread.Start();
             
-            // 接続テスト
             SendPing();
         }
         catch (Exception e)
         {
             Debug.LogError($"❌ A2Cサーバー接続失敗: {e.Message}");
             OnConnectionChanged?.Invoke(false);
+            
+            if (autoReconnect && retryCount < maxRetries)
+            {
+                retryCount++;
+                Invoke(nameof(AttemptReconnection), reconnectInterval);
+            }
         }
+    }
+    
+    void AttemptReconnection()
+    {
+        if (isConnected || shouldStop) return;
+        
+        if (enableDebugLogs)
+        {
+            Debug.Log($"🔄 再接続試行 ({retryCount + 1}/{maxRetries})");
+        }
+        
+        ConnectToA2CServer();
     }
     
     void CommunicationLoop()
@@ -363,465 +475,401 @@ public class AluminumCanA2CClient : MonoBehaviour
         Debug.Log("🔌 CommunicationLoop終了");
     }
     
-    #endregion
-    
-    #region 🔥 新規追加：把持力指令待機システム
-    
-    /// <summary>
-    /// 把持力指令の待機を開始
-    /// </summary>
-    public void StartWaitingForGripForceCommand()
+    void ProcessMessageQueue()
     {
-        if (!waitForGripForceCommand) return;
-        
-        isWaitingForGripForceCommand = true;
-        hasReceivedCommandThisEpisode = false;
-        waitStartTime = Time.time;
-        
-        OnGripForceCommandWaitStarted?.Invoke();
-        
-        if (enableDebugLogs)
+        lock (queueLock)
         {
-            Debug.Log($"⏳ 把持力指令待機開始 - タイムアウト: {commandWaitTimeout}秒");
+            while (messageQueue.Count > 0)
+            {
+                string message = messageQueue.Dequeue();
+                ProcessA2CResponse(message);
+            }
         }
     }
     
-    /// <summary>
-    /// 把持力指令待機の完了
-    /// </summary>
-    /// <param name="isTimeout">タイムアウトによる完了かどうか</param>
-    private void CompleteGripForceCommandWait(bool isTimeout = false)
+    void ProcessA2CResponse(string message)
     {
-        if (!isWaitingForGripForceCommand) return;
+        if (string.IsNullOrEmpty(message)) return;
         
-        isWaitingForGripForceCommand = false;
+        totalMessagesReceived++;
         
-        if (isTimeout)
+        if (enableVerboseReceiveLog)
         {
-            episodesWithTimeout++;
-            OnGripForceCommandTimeout?.Invoke();
-            
-            if (enableDebugLogs)
+            Debug.Log($"📨 処理開始: {message}");
+        }
+        
+        // 🔥 把持力指令の解析と処理
+        if (enableGripForceReceiving && TryParseGripForceCommand(message, out float gripForce))
+        {
+            lock (gripForceQueueLock)
             {
-                Debug.LogWarning($"⏰ 把持力指令待機タイムアウト - エピソード {currentEpisodeNumber}");
+                gripForceCommandQueue.Enqueue(gripForce);
             }
+            
+            Debug.Log($"🔥 把持力指令を検出してキューに追加: {gripForce:F2}N");
         }
         else
         {
-            episodesWithCommands++;
-            OnGripForceCommandWaitCompleted?.Invoke();
-            
-            if (enableDebugLogs)
+            // 把持力指令でない場合のデバッグ
+            if (enableGripForceReceiving && (message.Contains("grip_force") || message.Contains("target_force")))
             {
-                Debug.Log($"✅ 把持力指令受信完了 - エピソード {currentEpisodeNumber}");
+                Debug.LogWarning($"⚠️ 把持力関連メッセージの解析に失敗: {message.Substring(0, Math.Min(100, message.Length))}...");
             }
         }
-    }
-    
-    /// <summary>
-    /// 現在把持力指令を待機中かどうか
-    /// </summary>
-    public bool IsWaitingForGripForceCommand()
-    {
-        return isWaitingForGripForceCommand;
-    }
-    
-    /// <summary>
-    /// 現在のエピソードで把持力指令を受信したかどうか
-    /// </summary>
-    public bool HasReceivedCommandThisEpisode()
-    {
-        return hasReceivedCommandThisEpisode;
-    }
-    
-    /// <summary>
-    /// 次のエピソードに進んでも良いかチェック
-    /// </summary>
-    public bool CanProceedToNextEpisode()
-    {
-        if (!waitForGripForceCommand) return true;  // 待機機能が無効なら常にOK
         
-        return !isWaitingForGripForceCommand;  // 待機中でなければOK
+        // その他のメッセージ処理
+        OnMessageReceived?.Invoke(message);
+        
+        if (enableVerboseReceiveLog)
+        {
+            Debug.Log($"📨 メッセージ処理完了: {message}");
+        }
     }
     
     #endregion
     
-    #region メッセージ送信
+    #region データ送信
     
-    void SendCanState()
+    public void SendCanState()
     {
         if (!isConnected || aluminumCan == null) return;
         
-        var state = aluminumCan.GetCurrentState();
-        
-        var message = new CanStateMessage
+        try
         {
-            is_crushed = state.isBroken,
-            grasp_result = DetermineGraspResult(),
-            current_force = state.appliedForce,
-            accumulated_force = aluminumCan.GetAccumulatedForce(),
-            timestamp = Time.time
-        };
-        
-        // 送信条件を厳格化
-        bool shouldSend = false;
-        
-        if (message.is_crushed && !lastCrushedState)
-        {
-            shouldSend = true;
-            hasEvaluatedThisEpisode = true;
+            var state = CollectCanStateData();
+            string jsonData = CreateStateJson(state);
+            
+            SendMessage(jsonData);
+            totalMessagesSent++;
+            
+            if (enableVerboseReceiveLog)
+            {
+                Debug.Log($"📤 状態送信: {jsonData}");
+            }
         }
-        else if (!message.is_crushed && Math.Abs(message.current_force - lastForce) > 0.1f)
+        catch (Exception e)
         {
-            shouldSend = true;
+            Debug.LogError($"❌ 状態送信エラー: {e.Message}");
         }
-        else if (!message.is_crushed && message.current_force > 0.1f && lastForce <= 0.1f)
-        {
-            shouldSend = true;
-        }
-        
-        if (shouldSend)
-        {
-            SendMessage(message);
-        }
-        
-        // 状態更新
-        lastCrushedState = message.is_crushed;
-        lastForce = message.current_force;
-    }
-
-    private string DetermineGraspResult()
-    {
-        if (aluminumCan.IsBroken)
-            return "overgrip";
-        
-        var state = aluminumCan.GetCurrentState();
-        if (state.appliedForce > 0.1f && state.appliedForce < 15f && !state.isBroken)
-            return "success";
-        
-        return "undergrip";
     }
     
-    void SendPing()
+    private CanStateData CollectCanStateData()
     {
-        var pingMessage = new SimpleMessage { type = "ping", timestamp = Time.time };
-        SendMessage(pingMessage);
+        var state = new CanStateData();
         
-        if (enableDebugLogs)
-            Debug.Log("🏓 Ping送信");
-    }
-    
-    public void SendEpisodeEnd()
-    {
-        var endMessage = new SimpleMessage { type = "episode_end", timestamp = Time.time };
-        SendMessage(endMessage);
-        
-        isEpisodeActive = false;
-        
-        if (enableDebugLogs)
-            Debug.Log("📋 エピソード終了通知を送信");
-    }
-    
-    public void SendReset()
-    {
-        hasEvaluatedThisEpisode = false;
-        lastCrushedState = false;
-        lastForce = 0f;
-        isEpisodeActive = true;
-        currentEpisodeNumber++;  // 🔥 新規追加：エピソード番号をカウント
-        
-        // 🔥 新規追加：把持力指令待機を開始
-        if (waitForGripForceCommand)
+        // アルミ缶の状態
+        if (aluminumCan != null)
         {
-            StartWaitingForGripForceCommand();
+            state.position = aluminumCan.transform.position;
+            state.rotation = aluminumCan.transform.rotation;
+            state.isBroken = aluminumCan.IsBroken;
+            
+            // 既存のGetCurrentState()メソッドを使用
+            var canState = aluminumCan.GetCurrentState();
+            state.deformationLevel = canState.deformation;
+            
+            var rb = aluminumCan.GetComponent<Rigidbody>();
+            if (rb != null)
+            {
+                state.velocity = rb.velocity;
+                state.angularVelocity = rb.angularVelocity;
+            }
         }
         
-        var resetMessage = new SimpleMessage { type = "reset", timestamp = Time.time };
-        SendMessage(resetMessage);
+        // グリッパーの状態
+        if (gripperInterface != null)
+        {
+            state.hasContact = gripperInterface.HasValidContact();
+            
+            // 既存のメソッドがないため、デフォルト値を使用
+            state.contactForce = 0f; // TODO: 実際の接触力の取得方法を実装
+        }
         
-        if (enableDebugLogs)
-            Debug.Log($"🔄 リセット通知を送信 - エピソード {currentEpisodeNumber}");
+        // 把持力の状態
+        if (gripForceController != null)
+        {
+            state.currentGripForce = gripForceController.baseGripForce;
+            
+            // GetCurrentForce()がないため、代替手段を使用
+            state.actualGripForce = gripForceController.baseGripForce; // TODO: 実際の現在力の取得
+        }
+        
+        // エピソード情報
+        state.episodeNumber = currentEpisodeNumber;
+        state.episodeActive = isEpisodeActive;
+        state.timestamp = Time.time;
+        
+        // 🔥 TCP把持力情報
+        state.lastTcpGripForce = lastReceivedGripForce ?? 0f;
+        state.hasTcpCommand = lastReceivedGripForce.HasValue;
+        state.tcpCommandAge = lastReceivedGripForce.HasValue ? 
+            (float)(DateTime.Now - lastGripForceReceiveTime).TotalSeconds : -1f;
+        
+        return state;
     }
     
-    public void OnNewEpisodeStarted()
+    private string CreateStateJson(CanStateData state)
     {
-        hasEvaluatedThisEpisode = false;
-        lastCrushedState = false;
-        lastForce = 0f;
-        isEpisodeActive = true;
+        // 手動でJSON文字列を作成（JsonUtilityを使わない場合）
+        var json = new StringBuilder();
+        json.Append("{");
         
-        if (enableDebugLogs)
-            Debug.Log("🆕 新エピソード開始");
+        // 基本状態
+        json.Append($"\"episode\":{state.episodeNumber},");
+        json.Append($"\"active\":{state.episodeActive.ToString().ToLower()},");
+        json.Append($"\"timestamp\":{state.timestamp:F3},");
+        
+        // アルミ缶状態
+        json.Append($"\"position\":[{state.position.x:F3},{state.position.y:F3},{state.position.z:F3}],");
+        json.Append($"\"velocity\":[{state.velocity.x:F3},{state.velocity.y:F3},{state.velocity.z:F3}],");
+        json.Append($"\"broken\":{state.isBroken.ToString().ToLower()},");
+        json.Append($"\"deformation\":{state.deformationLevel:F3},");
+        
+        // グリッパー状態
+        json.Append($"\"contact\":{state.hasContact.ToString().ToLower()},");
+        json.Append($"\"contact_force\":{state.contactForce:F3},");
+        json.Append($"\"grip_force\":{state.currentGripForce:F3},");
+        json.Append($"\"actual_grip_force\":{state.actualGripForce:F3},");
+        
+        // 🔥 TCP把持力情報
+        json.Append($"\"tcp_grip_force\":{state.lastTcpGripForce:F3},");
+        json.Append($"\"has_tcp_command\":{state.hasTcpCommand.ToString().ToLower()},");
+        json.Append($"\"tcp_command_age\":{state.tcpCommandAge:F3}");
+        
+        json.Append("}");
+        
+        return json.ToString();
     }
     
-    public void OnEpisodeCompleted()
-    {
-        isEpisodeActive = false;
-        
-        if (enableDebugLogs)
-            Debug.Log("🏁 エピソード完了");
-    }
-    
-    void SendMessage(object message)
+    public void SendMessage(string message)
     {
         if (!isConnected || stream == null) return;
         
         try
         {
-            string json = JsonUtility.ToJson(message);
-            byte[] data = Encoding.UTF8.GetBytes(json + "\n");
+            byte[] data = Encoding.UTF8.GetBytes(message + "\n");
             stream.Write(data, 0, data.Length);
-            
-            if (enableDebugLogs)
-            {
-                Debug.Log($"📤 送信データ: {json}");
-            }
         }
         catch (Exception e)
         {
             Debug.LogError($"❌ メッセージ送信エラー: {e.Message}");
+            isConnected = false;
         }
+    }
+    
+    public void SendPing()
+    {
+        SendMessage("PING");
+    }
+    
+    public void SendReset()
+    {
+        SendMessage("RESET");
+        hasEvaluatedThisEpisode = false;
+    }
+    
+    public void SendEpisodeEnd()
+    {
+        SendMessage("EPISODE_END");
+        hasEvaluatedThisEpisode = true;
     }
     
     #endregion
     
-    #region メッセージ受信処理
+    #region GUI表示
     
-    void ProcessA2CResponse(string response)
+    void OnGUI()
     {
-        if (string.IsNullOrEmpty(response))
-        {
-            if (enableVerboseReceiveLog)
-                Debug.LogWarning("⚠️ 空の応答を受信");
-            return;
-        }
+        if (!showGripForceGUI) return;
         
-        totalMessagesReceived++;
+        GUILayout.BeginArea(new Rect(guiPosition.x, guiPosition.y, guiSize.x, guiSize.y));
         
-        try
-        {
-            if (enableVerboseReceiveLog)
-            {
-                Debug.Log($"📥 メッセージ処理開始: {response}");
-            }
-            
-            string[] messages = response.Split(new char[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
-            
-            foreach (string message in messages)
-            {
-                if (string.IsNullOrWhiteSpace(message)) continue;
-                
-                ProcessSingleMessage(message.Trim());
-            }
-        }
-        catch (Exception e)
-        {
-            Debug.LogError($"❌ 応答処理エラー: {e.Message}");
-            if (enableDebugLogs)
-                Debug.Log($"問題のあるデータ: '{response}'");
-        }
-    }
-    
-    void ProcessSingleMessage(string jsonMessage)
-    {
-        try
-        {
-            string type = ExtractTypeFromJson(jsonMessage);
-            
-            if (enableVerboseReceiveLog)
-                Debug.Log($"📋 メッセージタイプ: '{type}' - データ: {jsonMessage}");
-            
-            switch (type)
-            {
-                case "pong":
-                    if (enableDebugLogs)
-                        Debug.Log("🏓 Pong受信 - 接続正常");
-                    break;
-                    
-                case "ack":
-                    if (enableDebugLogs)
-                        Debug.Log("✅ ACK受信 - メッセージ確認");
-                    break;
-                    
-                case "action_response":
-                    if (enableDebugLogs)
-                        Debug.Log("🎯 A2C応答受信");
-                    break;
-                    
-                case "episode_complete":
-                    if (enableDebugLogs)
-                        Debug.Log("🏁 エピソード完了受信");
-                    break;
-                    
-                case "reset_complete":
-                    if (enableDebugLogs)
-                        Debug.Log("🔄 リセット完了受信");
-                    break;
-                    
-                case "grip_force_command":
-                    Debug.Log($"🎯🎯🎯 把持力コマンド検出！メッセージ: {jsonMessage}");
-                    ProcessGripForceCommand(jsonMessage);
-                    break;
-                    
-                default:
-                    if (enableDebugLogs)
-                        Debug.Log($"❓ 不明な応答タイプ: '{type}' - データ: {jsonMessage}");
-                    break;
-            }
-        }
-        catch (Exception e)
-        {
-            Debug.LogError($"❌ 単一メッセージ処理エラー: {e.Message}");
-            Debug.LogError($"問題のメッセージ: '{jsonMessage}'");
-        }
-    }
-    
-    void ProcessGripForceCommand(string jsonMessage)
-    {
-        Debug.Log($"🔥 ProcessGripForceCommand開始 - JSON: {jsonMessage}");
+        // 背景ボックス
+        GUI.Box(new Rect(0, 0, guiSize.x, guiSize.y), "");
         
-        try
-        {
-            var command = JsonUtility.FromJson<GripForceCommand>(jsonMessage);
-            
-            Debug.Log($"🔥 JSON解析成功 - target_force: {command.target_force}");
-            
-            // 受信データを保存
-            receivedGripForce = command.target_force;
-            lastExecutionMode = command.execution_mode;
-            lastDuration = command.duration;
-            lastReceivedTime = DateTime.Now.ToString("HH:mm:ss");
-            totalCommandsReceived++;
-            gripForceCommandsReceived++;
-            hasReceivedCommand = true;
-            hasReceivedCommandThisEpisode = true;  // 🔥 新規追加
-            
-            // 🔥 新規追加：待機完了
-            CompleteGripForceCommandWait(false);
-            
-            // イベント発火
-            OnGripForceCommandReceived?.Invoke(command.target_force);
-            
-            // 確実にログ出力
-            Debug.Log($"🎯✅ 把持力コマンド受信成功！");
-            Debug.Log($"  └ 把持力: {command.target_force:F1}N");
-            Debug.Log($"  └ モード: {command.execution_mode}");
-            Debug.Log($"  └ 時間: {command.duration:F1}秒");
-            Debug.Log($"  └ 受信時刻: {lastReceivedTime}");
-            Debug.Log($"  └ エピソード: {currentEpisodeNumber}");
-            Debug.Log($"  └ 待機完了: ✅");
-            
-            // 応答を送信
-            SendGripForceResponse(command.target_force, "received");
-        }
-        catch (Exception e)
-        {
-            Debug.LogError($"❌ 把持力コマンド処理エラー: {e.Message}");
-            Debug.LogError($"失敗したJSON: '{jsonMessage}'");
-        }
-    }
-    
-    void SendGripForceResponse(float targetForce, string status)
-    {
-        var response = new
-        {
-            type = "grip_force_response",
-            target_force = targetForce,
-            status = status,
-            timestamp = Time.time
+        GUILayout.BeginVertical();
+        
+        // タイトル
+        GUIStyle titleStyle = new GUIStyle(GUI.skin.label) 
+        { 
+            fontSize = 16, 
+            fontStyle = FontStyle.Bold,
+            normal = { textColor = Color.white }
         };
+        GUILayout.Label("🔥 TCP把持力制御", titleStyle);
         
-        SendMessage(response);
+        GUILayout.Space(5);
         
-        if (enableDebugLogs)
+        // 接続状態
+        string connectionStatus = isConnected ? "✅ 接続中" : "❌ 切断";
+        Color connectionColor = isConnected ? Color.green : Color.red;
+        GUILayout.Label(connectionStatus, new GUIStyle(GUI.skin.label) 
+        { 
+            normal = { textColor = connectionColor }
+        });
+        
+        // エピソード状態
+        if (isEpisodeActive)
         {
-            Debug.Log($"📤 把持力応答送信: {status} - 力: {targetForce:F1}N");
+            GUILayout.Label($"📋 エピソード: {currentEpisodeNumber}", new GUIStyle(GUI.skin.label) 
+            { 
+                normal = { textColor = Color.cyan }
+            });
         }
-    }
-    
-    string ExtractTypeFromJson(string json)
-    {
-        try
+        
+        GUILayout.Space(5);
+        
+        // 🔥 把持力指令情報
+        if (lastReceivedGripForce.HasValue)
         {
-            int typeStart = json.IndexOf("\"type\"");
-            if (typeStart == -1) return "unknown";
+            float age = (float)(DateTime.Now - lastGripForceReceiveTime).TotalSeconds;
+            Color forceColor = age < 5f ? Color.green : Color.yellow;
             
-            int valueStart = json.IndexOf(":", typeStart) + 1;
-            int quoteStart = json.IndexOf("\"", valueStart) + 1;
-            int quoteEnd = json.IndexOf("\"", quoteStart);
-            
-            if (quoteStart > 0 && quoteEnd > quoteStart)
-            {
-                return json.Substring(quoteStart, quoteEnd - quoteStart);
-            }
+            GUILayout.Label($"🔥 最新指令: {lastReceivedGripForce.Value:F1}N", new GUIStyle(GUI.skin.label) 
+            { 
+                normal = { textColor = forceColor }
+            });
+            GUILayout.Label($"   受信: {age:F1}秒前", new GUIStyle(GUI.skin.label) 
+            { 
+                normal = { textColor = Color.gray }
+            });
         }
-        catch
+        else
         {
-            // 解析失敗時はunknownを返す
+            GUILayout.Label("🔥 指令: 未受信", new GUIStyle(GUI.skin.label) 
+            { 
+                normal = { textColor = Color.gray }
+            });
         }
         
-        return "unknown";
+        GUILayout.Space(5);
+        
+        // 統計情報
+        GUILayout.Label($"📊 統計:", new GUIStyle(GUI.skin.label) 
+        { 
+            fontStyle = FontStyle.Bold,
+            normal = { textColor = Color.white }
+        });
+        GUILayout.Label($"  受信: {totalMessagesReceived}", new GUIStyle(GUI.skin.label) 
+        { 
+            normal = { textColor = Color.white }
+        });
+        GUILayout.Label($"  把持力: {gripForceCommandsReceived}", new GUIStyle(GUI.skin.label) 
+        { 
+            normal = { textColor = Color.white }
+        });
+        GUILayout.Label($"  転送: {gripForceCommandsForwarded}", new GUIStyle(GUI.skin.label) 
+        { 
+            normal = { textColor = Color.white }
+        });
+        GUILayout.Label($"  無効: {invalidGripForceCommands}", new GUIStyle(GUI.skin.label) 
+        { 
+            normal = { textColor = Color.red }
+        });
+        
+        // アルミ缶状態
+        if (aluminumCan != null)
+        {
+            string statusText = aluminumCan.IsBroken ? "🔴 つぶれ" : "🟢 正常";
+            Color statusColor = aluminumCan.IsBroken ? Color.red : Color.green;
+            GUILayout.Label($"缶状態: {statusText}", new GUIStyle(GUI.skin.label) 
+            { 
+                normal = { textColor = statusColor }
+            });
+        }
+        
+        GUILayout.EndVertical();
+        GUILayout.EndArea();
     }
     
     #endregion
     
-    #region 公開API
+    #region 統計・ユーティリティ
     
-    public float GetReceivedGripForce()
+    void ShowStatistics()
     {
-        return receivedGripForce;
+        float tcpUsageRate = totalMessagesReceived > 0 ? 
+            (float)gripForceCommandsReceived / totalMessagesReceived * 100f : 0f;
+        float forwardingRate = gripForceCommandsReceived > 0 ? 
+            (float)gripForceCommandsForwarded / gripForceCommandsReceived * 100f : 0f;
+        
+        Debug.Log("=== AluminumCanA2CClient 統計 ===");
+        Debug.Log($"接続試行回数: {connectionAttempts}");
+        Debug.Log($"総受信メッセージ: {totalMessagesReceived}");
+        Debug.Log($"総送信メッセージ: {totalMessagesSent}");
+        Debug.Log($"🔥 把持力指令受信: {gripForceCommandsReceived} ({tcpUsageRate:F1}%)");
+        Debug.Log($"🔥 把持力指令転送: {gripForceCommandsForwarded} ({forwardingRate:F1}%)");
+        Debug.Log($"🔥 無効指令: {invalidGripForceCommands}");
+        Debug.Log($"現在接続状態: {(isConnected ? "接続中" : "切断")}");
     }
     
-    public bool HasReceivedGripForceCommand()
+    /// <summary>
+    /// 手動で把持力指令をテスト送信
+    /// </summary>
+    [ContextMenu("テスト把持力指令送信")]
+    public void SendTestGripForceCommand()
     {
-        return hasReceivedCommand;
-    }
-    
-    public bool IsConnected()
-    {
-        return isConnected;
-    }
-    
-    public void ClearGripForceDisplay()
-    {
-        hasReceivedCommand = false;
-        receivedGripForce = 0f;
-        lastExecutionMode = "";
-        lastDuration = 0f;
-        lastReceivedTime = "";
-    }
-    
-    // 🔥 新規追加：待機システム制御API
-    public void SetWaitForGripForceCommand(bool enable)
-    {
-        waitForGripForceCommand = enable;
+        float testForce = UnityEngine.Random.Range(minGripForceValue, maxGripForceValue);
+        OnTcpGripForceCommandReceived(testForce);
         
         if (enableDebugLogs)
         {
-            Debug.Log($"🔧 把持力指令待機: {(enable ? "有効" : "無効")}");
+            Debug.Log($"🧪 テスト把持力指令送信: {testForce:F2}N");
         }
     }
     
-    public void SetCommandWaitTimeout(float timeoutSeconds)
+    /// <summary>
+    /// 外部から呼び出し可能な把持力指令受信メソッド
+    /// </summary>
+    public void OnTcpGripForceCommandReceived(float gripForce)
     {
-        commandWaitTimeout = timeoutSeconds;
+        lock (gripForceQueueLock)
+        {
+            gripForceCommandQueue.Enqueue(gripForce);
+        }
+    }
+    
+    /// <summary>
+    /// 統計情報の取得
+    /// </summary>
+    public A2CClientStatistics GetStatistics()
+    {
+        return new A2CClientStatistics
+        {
+            isConnected = isConnected,
+            connectionAttempts = connectionAttempts,
+            totalMessagesReceived = totalMessagesReceived,
+            totalMessagesSent = totalMessagesSent,
+            gripForceCommandsReceived = gripForceCommandsReceived,
+            gripForceCommandsForwarded = gripForceCommandsForwarded,
+            invalidGripForceCommands = invalidGripForceCommands,
+            lastGripForceValue = lastReceivedGripForce ?? 0f,
+            hasRecentGripForce = lastReceivedGripForce.HasValue && 
+                (DateTime.Now - lastGripForceReceiveTime).TotalSeconds < 10f
+        };
+    }
+    
+    /// <summary>
+    /// 設定の動的変更
+    /// </summary>
+    public void SetGripForceReceivingEnabled(bool enabled)
+    {
+        enableGripForceReceiving = enabled;
         
         if (enableDebugLogs)
         {
-            Debug.Log($"🔧 待機タイムアウト設定: {timeoutSeconds}秒");
+            Debug.Log($"🔥 把持力指令受信: {(enabled ? "有効化" : "無効化")}");
         }
     }
     
-    [ContextMenu("統計リセット")]
-    public void ResetStatistics()
+    public void SetGripForceForwardingEnabled(bool enabled)
     {
-        totalMessagesReceived = 0;
-        gripForceCommandsReceived = 0;
-        totalCommandsReceived = 0;
-        episodesWithCommands = 0;
-        episodesWithTimeout = 0;
-        currentEpisodeNumber = 0;
-        Debug.Log("📊 統計情報をリセットしました");
+        enableGripForceForwarding = enabled;
+        
+        if (enableDebugLogs)
+        {
+            Debug.Log($"🔥 把持力指令転送: {(enabled ? "有効化" : "無効化")}");
+        }
     }
     
     #endregion
@@ -831,6 +879,14 @@ public class AluminumCanA2CClient : MonoBehaviour
     void OnDestroy()
     {
         Disconnect();
+        
+        // イベントの解除
+        if (episodeManager != null)
+        {
+            episodeManager.OnEpisodeStarted -= OnEpisodeStarted;
+            episodeManager.OnEpisodeCompleted -= OnEpisodeCompleted;
+            episodeManager.OnSessionCompleted -= OnSessionCompleted;
+        }
     }
     
     void OnApplicationQuit()
@@ -858,4 +914,47 @@ public class AluminumCanA2CClient : MonoBehaviour
     }
     
     #endregion
+}
+
+/// <summary>
+/// アルミ缶の状態データ
+/// </summary>
+[System.Serializable]
+public class CanStateData
+{
+    public Vector3 position;
+    public Quaternion rotation;
+    public Vector3 velocity;
+    public Vector3 angularVelocity;
+    public bool isBroken;
+    public float deformationLevel;
+    public bool hasContact;
+    public float contactForce;
+    public float currentGripForce;
+    public float actualGripForce;
+    public int episodeNumber;
+    public bool episodeActive;
+    public float timestamp;
+    
+    // 🔥 TCP把持力関連
+    public float lastTcpGripForce;
+    public bool hasTcpCommand;
+    public float tcpCommandAge;
+}
+
+/// <summary>
+/// A2CClient統計情報
+/// </summary>
+[System.Serializable]
+public class A2CClientStatistics
+{
+    public bool isConnected;
+    public int connectionAttempts;
+    public int totalMessagesReceived;
+    public int totalMessagesSent;
+    public int gripForceCommandsReceived;
+    public int gripForceCommandsForwarded;
+    public int invalidGripForceCommands;
+    public float lastGripForceValue;
+    public bool hasRecentGripForce;
 }
