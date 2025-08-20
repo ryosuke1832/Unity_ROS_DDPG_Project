@@ -55,6 +55,12 @@ public class TcpGripForceConnector : MonoBehaviour
             
         if (episodeManager.a2cClient == null)
             episodeManager.a2cClient = a2cClient;
+
+        // 🔥 TCP待機タイムアウトを2秒に設定
+        if (episodeManager != null)
+        {
+            episodeManager.SetTcpCommandWaitTimeout(2.0f);
+        }
         
         if (enableDebugLogs)
         {
