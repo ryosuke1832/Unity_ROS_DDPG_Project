@@ -19,7 +19,7 @@ public class AutoEpisodeManager : MonoBehaviour
     
     [Header("エピソード設定")]
     [Range(1f, 10f)]
-    public float episodeDuration = 30f; // エピソードの最大時間（秒）
+    public float episodeDuration = 2f; // エピソードの最大時間（秒）
     
     [Range(0.5f, 5f)]
     public float resetDelay = 2f; // リセット後の待機時間
@@ -30,7 +30,7 @@ public class AutoEpisodeManager : MonoBehaviour
     [Header("🔥 TCP把持力制御")]
     [SerializeField] private bool enableTcpGripForceControl = false;
     [Range(1f, 30f)]
-    public float tcpCommandWaitTimeout = 10f; // TCP指令待機のタイムアウト
+    public float tcpCommandWaitTimeout = 2f; // TCP指令待機のタイムアウト
     public bool waitForTcpCommandBeforeStart = true; // エピソード開始前にTCP指令を待機
     public bool useTcpForceWhenAvailable = true; // TCP指令が利用可能な場合に優先使用
     
