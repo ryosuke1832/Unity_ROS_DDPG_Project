@@ -589,6 +589,8 @@ public class AutoEpisodeManager : MonoBehaviour
         
         if (a2cClient != null)
         {
+            // エピソード結果を送信（1回のみ）
+            a2cClient.SendEpisodeResult(wasSuccessful);
             a2cClient.SendEpisodeEnd();
         }
         
