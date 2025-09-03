@@ -70,6 +70,8 @@ public class AluminumCanA2CClient : MonoBehaviour
     private bool isEpisodeActive = false;
     private bool hasEvaluatedThisEpisode = false;
     private int currentEpisodeNumber = 0;
+    // 一回のエピソードで結果を送信したかのフラグ
+    private bool episodeResultSent = false;
     
     // 🔥 把持力指令関連
     private Queue<float> gripForceCommandQueue = new Queue<float>();
@@ -666,12 +668,27 @@ public class AluminumCanA2CClient : MonoBehaviour
     {
         SendMessage("RESET");
         hasEvaluatedThisEpisode = false;
+        // 次のエピソードのために結果送信フラグをリセット
+        episodeResultSent = false;
     }
-    
+
     public void SendEpisodeEnd()
     {
         SendMessage("EPISODE_END");
         hasEvaluatedThisEpisode = true;
+    }
+
+    /// <summary>
+    /// エピソードの成功/失敗結果を送信
+    /// </summary>
+    /// <param name="wasSuccessful">成功した場合は true</param>
+    public void SendEpisodeResult(bool wasSuccessful)
+    {
+        if (episodeResultSent) return;
+
+        string resultMessage = wasSuccessful ? "RESULT_SUCCESS" : "RESULT_FAIL";
+        SendMessage(resultMessage);
+        episodeResultSent = true;
     }
     
     #endregion
