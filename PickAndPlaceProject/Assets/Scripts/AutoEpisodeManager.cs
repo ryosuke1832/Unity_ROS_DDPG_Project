@@ -590,8 +590,10 @@ public class AutoEpisodeManager : MonoBehaviour
         else
             failedEpisodes++;
         
+
         // リセット直前に送信するため結果を保存
         pendingEpisodeResult = wasSuccessful;
+
         
         if (enableDebugLogs)
         {
