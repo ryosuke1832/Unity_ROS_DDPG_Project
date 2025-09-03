@@ -688,7 +688,7 @@ public class AluminumCanA2CClient : MonoBehaviour
 
         string resultMessage = wasSuccessful ? "RESULT_SUCCESS" : "RESULT_FAIL";
         SendMessage(resultMessage);
-        episodeResultSent = true;
+        Debug.Log($"📤 エピソード結果送信: {resultMessage}");
     }
     
     #endregion
