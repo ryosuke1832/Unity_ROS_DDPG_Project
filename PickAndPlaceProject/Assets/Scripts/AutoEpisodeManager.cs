@@ -73,6 +73,8 @@ public class AutoEpisodeManager : MonoBehaviour
     private bool isWaitingForTcpCommand = false;
     private float tcpCommandWaitStartTime = 0f;
     private GripForceSource currentGripForceSource = GripForceSource.Random;
+    // エピソード結果の一時保管（リセット直前に送信）
+    private bool? pendingEpisodeResult = null;
     
     // 統計
     private int successfulEpisodes = 0;
@@ -504,6 +506,7 @@ public class AutoEpisodeManager : MonoBehaviour
     
     IEnumerator StartNewEpisode()
     {
+        pendingEpisodeResult = null;
         currentState = EpisodeState.Starting;
         currentEpisodeNumber++;
         episodeStartTime = Time.time;
@@ -587,10 +590,8 @@ public class AutoEpisodeManager : MonoBehaviour
         else
             failedEpisodes++;
         
-        if (a2cClient != null)
-        {
-            a2cClient.SendEpisodeEnd();
-        }
+        // リセット直前に送信するため結果を保存
+        pendingEpisodeResult = wasSuccessful;
         
         if (enableDebugLogs)
         {
@@ -618,7 +619,15 @@ public class AutoEpisodeManager : MonoBehaviour
     IEnumerator ResetForNextEpisode()
     {
         currentState = EpisodeState.Resetting;
-        
+
+        // 🔥 リセットの直前にエピソード結果を送信
+        if (a2cClient != null && pendingEpisodeResult.HasValue)
+        {
+            a2cClient.SendEpisodeResult(pendingEpisodeResult.Value);
+            a2cClient.SendEpisodeEnd();
+            pendingEpisodeResult = null;
+        }
+
         if (enableDebugLogs)
         {
             Debug.Log("🔄 次のエピソードに向けてリセット中...");

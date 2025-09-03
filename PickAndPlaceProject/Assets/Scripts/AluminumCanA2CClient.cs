@@ -70,9 +70,11 @@ public class AluminumCanA2CClient : MonoBehaviour
     private bool isEpisodeActive = false;
     private bool hasEvaluatedThisEpisode = false;
     private int currentEpisodeNumber = 0;
+    // 一回のエピソードで結果を送信したかのフラグ
+    private bool episodeResultSent = false;
     
-    // 🔥 把持力指令関連
-    private Queue<float> gripForceCommandQueue = new Queue<float>();
+    // 🔥 把持力指令関連（キューの上限は1つ）
+    private float? pendingGripForceCommand = null;
     private readonly object gripForceQueueLock = new object();
     private float? lastReceivedGripForce = null;
     private DateTime lastGripForceReceiveTime = DateTime.MinValue;
@@ -219,7 +221,7 @@ public class AluminumCanA2CClient : MonoBehaviour
     #region 🔥 把持力指令処理
     
     /// <summary>
-    /// 把持力指令キューの処理
+    /// 把持力指令ストックの処理（常に最新1件のみ）
     /// </summary>
     void ProcessGripForceCommands()
     {
@@ -227,9 +229,10 @@ public class AluminumCanA2CClient : MonoBehaviour
         
         lock (gripForceQueueLock)
         {
-            while (gripForceCommandQueue.Count > 0)
+            if (pendingGripForceCommand.HasValue)
             {
-                float gripForce = gripForceCommandQueue.Dequeue();
+                float gripForce = pendingGripForceCommand.Value;
+                pendingGripForceCommand = null; // ストックを空にする
                 ProcessGripForceCommand(gripForce);
             }
         }
@@ -256,31 +259,30 @@ public class AluminumCanA2CClient : MonoBehaviour
         gripForceCommandsReceived++;
         
         Debug.Log($"🔥 把持力指令受信完了: {gripForce:F2}N (受信数: {gripForceCommandsReceived})");
-        
-        // イベント発火
-        OnGripForceCommandReceived?.Invoke(gripForce);
-        Debug.Log($"🔥 イベント発火完了");
-        
-        // 🔥 AutoEpisodeManagerに転送
-        if (enableGripForceForwarding && episodeManager != null)
+
+        if (enableGripForceForwarding)
         {
-            episodeManager.OnTcpGripForceCommandReceived(gripForce);
-            gripForceCommandsForwarded++;
-            
-            Debug.Log($"🔥 把持力指令転送完了: {gripForce:F2}N -> AutoEpisodeManager (転送数: {gripForceCommandsForwarded})");
-        }
-        else
-        {
-            if (!enableGripForceForwarding)
+            if (OnGripForceCommandReceived != null)
             {
-                Debug.LogWarning($"⚠️ 把持力転送が無効化されています");
+                OnGripForceCommandReceived.Invoke(gripForce);
+                Debug.Log($"🔥 イベント発火完了");
             }
-            if (episodeManager == null)
+            else if (episodeManager != null)
+            {
+                episodeManager.OnTcpGripForceCommandReceived(gripForce);
+                gripForceCommandsForwarded++;
+                Debug.Log($"🔥 把持力指令転送完了: {gripForce:F2}N -> AutoEpisodeManager (転送数: {gripForceCommandsForwarded})");
+            }
+            else
             {
                 Debug.LogWarning($"⚠️ EpisodeManagerが設定されていません");
             }
         }
-        
+        else
+        {
+            Debug.LogWarning($"⚠️ 把持力転送が無効化されています");
+        }
+
         Debug.Log($"🔥 把持力指令処理完了: {gripForce:F2}N");
     }
     
@@ -503,10 +505,10 @@ public class AluminumCanA2CClient : MonoBehaviour
         {
             lock (gripForceQueueLock)
             {
-                gripForceCommandQueue.Enqueue(gripForce);
+                pendingGripForceCommand = gripForce; // ストックは常に1つだけ保持
             }
-            
-            Debug.Log($"🔥 把持力指令を検出してキューに追加: {gripForce:F2}N");
+
+            Debug.Log($"🔥 把持力指令を検出してストックを更新: {gripForce:F2}N");
         }
         else
         {
@@ -666,12 +668,28 @@ public class AluminumCanA2CClient : MonoBehaviour
     {
         SendMessage("RESET");
         hasEvaluatedThisEpisode = false;
+        // 次のエピソードのために結果送信フラグをリセット
+        episodeResultSent = false;
     }
-    
+
     public void SendEpisodeEnd()
     {
         SendMessage("EPISODE_END");
         hasEvaluatedThisEpisode = true;
+    }
+
+    /// <summary>
+    /// エピソードの成功/失敗結果を送信
+    /// </summary>
+    /// <param name="wasSuccessful">成功した場合は true</param>
+    public void SendEpisodeResult(bool wasSuccessful)
+    {
+        if (episodeResultSent) return;
+
+        string resultMessage = wasSuccessful ? "RESULT_SUCCESS" : "RESULT_FAIL";
+        SendMessage(resultMessage);
+        Debug.Log($"📤 エピソード結果送信: {resultMessage}");
+        episodeResultSent = true;
     }
     
     #endregion
@@ -825,7 +843,7 @@ public class AluminumCanA2CClient : MonoBehaviour
     {
         lock (gripForceQueueLock)
         {
-            gripForceCommandQueue.Enqueue(gripForce);
+            pendingGripForceCommand = gripForce; // 外部からの指令も1件のみ保持
         }
     }
     
