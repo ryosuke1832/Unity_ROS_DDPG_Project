@@ -66,7 +66,8 @@ public class AutoEpisodeManager : MonoBehaviour
     private float lastMovementTime = 0f;
     private Vector3 lastRobotPosition = Vector3.zero;
     private bool isRobotMoving = false;
-    private Vector3 initialCanPosition = Vector3.zero; 
+    private Vector3 initialCanPosition = Vector3.zero;
+    private Coroutine episodeLoopCoroutine;
 
     // 🔥 TCP把持力制御用の追加フィールド
     private float? pendingTcpGripForce = null; // TCPで受信した把持力指令
@@ -414,6 +415,7 @@ public class AutoEpisodeManager : MonoBehaviour
     
     public void StartAutoEpisodes()
     {
+        if (episodeLoopCoroutine != null) return;
         if (!enableAutoEpisodes) return;
         
         currentState = EpisodeState.Starting;
@@ -434,15 +436,20 @@ public class AutoEpisodeManager : MonoBehaviour
             Debug.Log($"エピソード時間: {episodeDuration}秒");
             Debug.Log($"🔥 TCP把持力制御: {(enableTcpGripForceControl ? "有効" : "無効")}");
         }
-        
-        StartCoroutine(ExecuteEpisodeLoop());
+        episodeLoopCoroutine = StartCoroutine(ExecuteEpisodeLoop());
     }
-    
+
     public void StopAutoEpisodes()
     {
         enableAutoEpisodes = false;
         currentState = EpisodeState.Finished;
         isWaitingForTcpCommand = false;
+
+        if (episodeLoopCoroutine != null)
+        {
+            StopCoroutine(episodeLoopCoroutine);
+            episodeLoopCoroutine = null;
+        }
         
         if (enableDebugLogs)
         {
@@ -1032,7 +1039,11 @@ public class AutoEpisodeManager : MonoBehaviour
     {
         if (currentState == EpisodeState.Running)
         {
-            StopCoroutine(ExecuteEpisodeLoop());
+            if (episodeLoopCoroutine != null)
+            {
+                StopCoroutine(episodeLoopCoroutine);
+                episodeLoopCoroutine = null;
+            }
             StartCoroutine(CompleteEpisode());
         }
     }
