@@ -86,12 +86,15 @@ public class AluminumCanA2CClient : MonoBehaviour
     private int invalidGripForceCommands = 0;
     private int totalMessagesSent = 0;
     private int connectionAttempts = 0;
-    
+
     // イベント
     public System.Action<bool> OnConnectionChanged;
     public System.Action<float> OnGripForceCommandReceived; // 🔥 新規追加
     public System.Action<string> OnMessageReceived;
     public System.Action<int> OnEpisodeStateChanged;
+
+    // AutoEpisodeManagerとのイベント連携が設定済みかを示すフラグ
+    private bool eventsHooked = false;
     
     void Start()
     {
@@ -163,13 +166,15 @@ public class AluminumCanA2CClient : MonoBehaviour
     // 🔥 AutoEpisodeManagerとの連携設定
     void SetupEpisodeManagerIntegration()
     {
+        if (eventsHooked) return;
         if (episodeManager == null) return;
-        
+
         // エピソード開始/終了イベントの購読
         episodeManager.OnEpisodeStarted += OnEpisodeStarted;
         episodeManager.OnEpisodeCompleted += OnEpisodeCompleted;
         episodeManager.OnSessionCompleted += OnSessionCompleted;
-        
+        eventsHooked = true;
+
         if (enableDebugLogs)
         {
             Debug.Log("🔥 AutoEpisodeManagerとの連携を設定しました");
@@ -897,14 +902,15 @@ public class AluminumCanA2CClient : MonoBehaviour
     void OnDestroy()
     {
         Disconnect();
-        
+
         // イベントの解除
-        if (episodeManager != null)
+        if (episodeManager != null && eventsHooked)
         {
             episodeManager.OnEpisodeStarted -= OnEpisodeStarted;
             episodeManager.OnEpisodeCompleted -= OnEpisodeCompleted;
             episodeManager.OnSessionCompleted -= OnSessionCompleted;
         }
+        eventsHooked = false;
     }
     
     void OnApplicationQuit()
