@@ -258,31 +258,30 @@ public class AluminumCanA2CClient : MonoBehaviour
         gripForceCommandsReceived++;
         
         Debug.Log($"🔥 把持力指令受信完了: {gripForce:F2}N (受信数: {gripForceCommandsReceived})");
-        
-        // イベント発火
-        OnGripForceCommandReceived?.Invoke(gripForce);
-        Debug.Log($"🔥 イベント発火完了");
-        
-        // 🔥 AutoEpisodeManagerに転送
-        if (enableGripForceForwarding && episodeManager != null)
+
+        if (enableGripForceForwarding)
         {
-            episodeManager.OnTcpGripForceCommandReceived(gripForce);
-            gripForceCommandsForwarded++;
-            
-            Debug.Log($"🔥 把持力指令転送完了: {gripForce:F2}N -> AutoEpisodeManager (転送数: {gripForceCommandsForwarded})");
-        }
-        else
-        {
-            if (!enableGripForceForwarding)
+            if (OnGripForceCommandReceived != null)
             {
-                Debug.LogWarning($"⚠️ 把持力転送が無効化されています");
+                OnGripForceCommandReceived.Invoke(gripForce);
+                Debug.Log($"🔥 イベント発火完了");
             }
-            if (episodeManager == null)
+            else if (episodeManager != null)
+            {
+                episodeManager.OnTcpGripForceCommandReceived(gripForce);
+                gripForceCommandsForwarded++;
+                Debug.Log($"🔥 把持力指令転送完了: {gripForce:F2}N -> AutoEpisodeManager (転送数: {gripForceCommandsForwarded})");
+            }
+            else
             {
                 Debug.LogWarning($"⚠️ EpisodeManagerが設定されていません");
             }
         }
-        
+        else
+        {
+            Debug.LogWarning($"⚠️ 把持力転送が無効化されています");
+        }
+
         Debug.Log($"🔥 把持力指令処理完了: {gripForce:F2}N");
     }
     
