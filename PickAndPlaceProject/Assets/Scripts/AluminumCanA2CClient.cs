@@ -73,8 +73,8 @@ public class AluminumCanA2CClient : MonoBehaviour
     // 一回のエピソードで結果を送信したかのフラグ
     private bool episodeResultSent = false;
     
-    // 🔥 把持力指令関連
-    private Queue<float> gripForceCommandQueue = new Queue<float>();
+    // 🔥 把持力指令関連（キューの上限は1つ）
+    private float? pendingGripForceCommand = null;
     private readonly object gripForceQueueLock = new object();
     private float? lastReceivedGripForce = null;
     private DateTime lastGripForceReceiveTime = DateTime.MinValue;
@@ -221,7 +221,7 @@ public class AluminumCanA2CClient : MonoBehaviour
     #region 🔥 把持力指令処理
     
     /// <summary>
-    /// 把持力指令キューの処理
+    /// 把持力指令ストックの処理（常に最新1件のみ）
     /// </summary>
     void ProcessGripForceCommands()
     {
@@ -229,9 +229,10 @@ public class AluminumCanA2CClient : MonoBehaviour
         
         lock (gripForceQueueLock)
         {
-            while (gripForceCommandQueue.Count > 0)
+            if (pendingGripForceCommand.HasValue)
             {
-                float gripForce = gripForceCommandQueue.Dequeue();
+                float gripForce = pendingGripForceCommand.Value;
+                pendingGripForceCommand = null; // ストックを空にする
                 ProcessGripForceCommand(gripForce);
             }
         }
@@ -504,10 +505,10 @@ public class AluminumCanA2CClient : MonoBehaviour
         {
             lock (gripForceQueueLock)
             {
-                gripForceCommandQueue.Enqueue(gripForce);
+                pendingGripForceCommand = gripForce; // ストックは常に1つだけ保持
             }
-            
-            Debug.Log($"🔥 把持力指令を検出してキューに追加: {gripForce:F2}N");
+
+            Debug.Log($"🔥 把持力指令を検出してストックを更新: {gripForce:F2}N");
         }
         else
         {
@@ -841,7 +842,7 @@ public class AluminumCanA2CClient : MonoBehaviour
     {
         lock (gripForceQueueLock)
         {
-            gripForceCommandQueue.Enqueue(gripForce);
+            pendingGripForceCommand = gripForce; // 外部からの指令も1件のみ保持
         }
     }
     
