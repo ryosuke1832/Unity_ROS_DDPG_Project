@@ -490,8 +490,9 @@ public class AutoEpisodeManager : MonoBehaviour
             Debug.Log("🏁 すべてのエピソードが完了しました");
             ShowFinalStatistics();
         }
-        
+
         OnSessionCompleted?.Invoke();
+        episodeLoopCoroutine = null;
     }
     
     // 🔥 TCP指令待機のコルーチン
