@@ -16,6 +16,7 @@ public class TcpGripForceConnector : MonoBehaviour
     [Header("⚙️ 設定")]
     public bool enableAutoConnection = true;
     public bool enableDebugLogs = true;
+    private bool isConnected = false;
     
     void Start()
     {
@@ -30,6 +31,11 @@ public class TcpGripForceConnector : MonoBehaviour
     /// </summary>
     void SetupConnections()
     {
+        if (isConnected)
+        {
+            return;
+        }
+
         // コンポーネントの自動検索
         if (episodeManager == null)
             episodeManager = FindObjectOfType<AutoEpisodeManager>();
@@ -48,6 +54,8 @@ public class TcpGripForceConnector : MonoBehaviour
             a2cClient.OnGripForceCommandReceived = new System.Action<float>(OnGripForceReceived);
         else
             a2cClient.OnGripForceCommandReceived += OnGripForceReceived;
+
+        isConnected = true;
         
         // 相互参照の設定
         if (a2cClient.episodeManager == null)
@@ -171,10 +179,15 @@ public class TcpGripForceConnector : MonoBehaviour
     
     void OnDestroy()
     {
+        if (!isConnected)
+            return;
+
         // イベントの解除
         if (a2cClient != null && a2cClient.OnGripForceCommandReceived != null)
         {
             a2cClient.OnGripForceCommandReceived -= OnGripForceReceived;
         }
+
+        isConnected = false;
     }
 }
