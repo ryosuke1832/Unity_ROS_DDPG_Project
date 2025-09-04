@@ -544,6 +544,13 @@ public class AluminumCanA2CClient : MonoBehaviour
         try
         {
             var state = CollectCanStateData();
+
+            // 🔁 送信直前に接触状態を最新のものに更新
+            if (gripperInterface != null)
+            {
+                state.hasContact = gripperInterface.HasValidContact();
+            }
+
             string jsonData = CreateStateJson(state);
             
             SendMessage(jsonData);
