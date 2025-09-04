@@ -248,14 +248,14 @@ public class AluminumCanA2CClient : MonoBehaviour
     /// </summary>
     void ProcessGripForceCommand(float gripForce)
     {
-        Debug.Log($"🔥 把持力指令処理開始: {gripForce:F2}N");
+        // Debug.Log($"🔥 把持力指令処理開始: {gripForce:F2}N");
         
         // 値の妥当性チェック
         if (gripForce < minGripForceValue || gripForce > maxGripForceValue)
         {
             invalidGripForceCommands++;
             
-            Debug.LogWarning($"⚠️ 無効な把持力指令: {gripForce:F2}N (範囲: {minGripForceValue:F1}-{maxGripForceValue:F1}N)");
+            // Debug.LogWarning($"⚠️ 無効な把持力指令: {gripForce:F2}N (範囲: {minGripForceValue:F1}-{maxGripForceValue:F1}N)");
             return;
         }
         
@@ -263,32 +263,32 @@ public class AluminumCanA2CClient : MonoBehaviour
         lastGripForceReceiveTime = DateTime.Now;
         gripForceCommandsReceived++;
         
-        Debug.Log($"🔥 把持力指令受信完了: {gripForce:F2}N (受信数: {gripForceCommandsReceived})");
+        // Debug.Log($"🔥 把持力指令受信完了: {gripForce:F2}N (受信数: {gripForceCommandsReceived})");
 
         if (enableGripForceForwarding)
         {
             if (OnGripForceCommandReceived != null)
             {
                 OnGripForceCommandReceived.Invoke(gripForce);
-                Debug.Log($"🔥 イベント発火完了");
+                // Debug.Log($"🔥 イベント発火完了");
             }
             else if (episodeManager != null)
             {
                 episodeManager.OnTcpGripForceCommandReceived(gripForce);
                 gripForceCommandsForwarded++;
-                Debug.Log($"🔥 把持力指令転送完了: {gripForce:F2}N -> AutoEpisodeManager (転送数: {gripForceCommandsForwarded})");
+                // Debug.Log($"🔥 把持力指令転送完了: {gripForce:F2}N -> AutoEpisodeManager (転送数: {gripForceCommandsForwarded})");
             }
             else
             {
-                Debug.LogWarning($"⚠️ EpisodeManagerが設定されていません");
+                // Debug.LogWarning($"⚠️ EpisodeManagerが設定されていません");
             }
         }
         else
         {
-            Debug.LogWarning($"⚠️ 把持力転送が無効化されています");
+            // Debug.LogWarning($"⚠️ 把持力転送が無効化されています");
         }
 
-        Debug.Log($"🔥 把持力指令処理完了: {gripForce:F2}N");
+        // Debug.Log($"🔥 把持力指令処理完了: {gripForce:F2}N");
     }
     
     /// <summary>
@@ -321,7 +321,7 @@ public class AluminumCanA2CClient : MonoBehaviour
                             {
                                 if (enableDebugLogs)
                                 {
-                                    Debug.Log($"🔥 JSON形式の把持力指令解析成功: {gripForce:F2}N");
+                                    // Debug.Log($"🔥 JSON形式の把持力指令解析成功: {gripForce:F2}N");
                                 }
                                 return true;
                             }
@@ -334,7 +334,7 @@ public class AluminumCanA2CClient : MonoBehaviour
         {
             if (enableDebugLogs)
             {
-                Debug.LogWarning($"JSON把持力指令解析エラー: {ex.Message}");
+                // Debug.LogWarning($"JSON把持力指令解析エラー: {ex.Message}");
             }
         }
         
@@ -351,7 +351,7 @@ public class AluminumCanA2CClient : MonoBehaviour
                 {
                     if (enableDebugLogs)
                     {
-                        Debug.Log($"🔥 テキスト形式の把持力指令解析成功: {gripForce:F2}N");
+                        // Debug.Log($"🔥 テキスト形式の把持力指令解析成功: {gripForce:F2}N");
                     }
                     return true;
                 }
@@ -377,7 +377,7 @@ public class AluminumCanA2CClient : MonoBehaviour
                     {
                         if (enableDebugLogs)
                         {
-                            Debug.Log($"🔥 旧JSON形式の把持力指令解析成功: {gripForce:F2}N");
+                            // Debug.Log($"🔥 旧JSON形式の把持力指令解析成功: {gripForce:F2}N");
                         }
                         return true;
                     }
@@ -460,7 +460,7 @@ public class AluminumCanA2CClient : MonoBehaviour
                     
                     if (enableVerboseReceiveLog)
                     {
-                        Debug.Log($"🔍 RAW受信データ（{bytes}バイト）: {response}");
+                        // Debug.Log($"🔍 RAW受信データ（{bytes}バイト）: {response}");
                     }
                     
                     lock (queueLock)
@@ -502,7 +502,7 @@ public class AluminumCanA2CClient : MonoBehaviour
         
         if (enableVerboseReceiveLog)
         {
-            Debug.Log($"📨 処理開始: {message}");
+            // Debug.Log($"📨 処理開始: {message}");
         }
         
         // 🔥 把持力指令の解析と処理
@@ -513,14 +513,14 @@ public class AluminumCanA2CClient : MonoBehaviour
                 pendingGripForceCommand = gripForce; // ストックは常に1つだけ保持
             }
 
-            Debug.Log($"🔥 把持力指令を検出してストックを更新: {gripForce:F2}N");
+            // Debug.Log($"🔥 把持力指令を検出してストックを更新: {gripForce:F2}N");
         }
         else
         {
             // 把持力指令でない場合のデバッグ
             if (enableGripForceReceiving && (message.Contains("grip_force") || message.Contains("target_force")))
             {
-                Debug.LogWarning($"⚠️ 把持力関連メッセージの解析に失敗: {message.Substring(0, Math.Min(100, message.Length))}...");
+                // Debug.LogWarning($"⚠️ 把持力関連メッセージの解析に失敗: {message.Substring(0, Math.Min(100, message.Length))}...");
             }
         }
         
@@ -529,7 +529,7 @@ public class AluminumCanA2CClient : MonoBehaviour
         
         if (enableVerboseReceiveLog)
         {
-            Debug.Log($"📨 メッセージ処理完了: {message}");
+            // Debug.Log($"📨 メッセージ処理完了: {message}");
         }
     }
     
@@ -551,12 +551,12 @@ public class AluminumCanA2CClient : MonoBehaviour
             
             if (enableVerboseReceiveLog)
             {
-                Debug.Log($"📤 状態送信: {jsonData}");
+                // Debug.Log($"📤 状態送信: {jsonData}");
             }
         }
         catch (Exception e)
         {
-            Debug.LogError($"❌ 状態送信エラー: {e.Message}");
+            // Debug.LogError($"❌ 状態送信エラー: {e.Message}");
         }
     }
     
@@ -659,7 +659,7 @@ public class AluminumCanA2CClient : MonoBehaviour
         }
         catch (Exception e)
         {
-            Debug.LogError($"❌ メッセージ送信エラー: {e.Message}");
+            // Debug.LogError($"❌ メッセージ送信エラー: {e.Message}");
             isConnected = false;
         }
     }

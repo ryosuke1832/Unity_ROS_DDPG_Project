@@ -269,7 +269,7 @@ public class AutoEpisodeManager : MonoBehaviour
         
         if (enableDebugLogs)
         {
-            Debug.Log($"🔥 TCP把持力指令受信: {gripForce:F2}N");
+            // Debug.Log($"🔥 TCP把持力指令受信: {gripForce:F2}N");
         }
         
         // 現在TCP指令を待機中の場合、待機を解除
