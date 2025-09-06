@@ -1,4 +1,5 @@
 using UnityEngine;
+using System;
 
 /// <summary>
 /// アルミ缶専用のグリッパーインターフェース
@@ -428,7 +429,8 @@ private void UpdateAdvancedContactDetection()
     // 変化ログ
     if (leftGripperInContact != wasLeftInContact)
     {
-        Debug.Log($"🔄 左グリッパー接触変化(高精度): {leftGripperInContact}");
+        string ts = DateTime.Now.ToString("HH:mm:ss.ff"); // ffで1/100秒（0.01s）
+        Debug.Log($"[{ts}] 🔄 左グリッパー接触変化(高精度): {leftGripperInContact}");
     }
     
     if (rightGripperInContact != wasRightInContact)
