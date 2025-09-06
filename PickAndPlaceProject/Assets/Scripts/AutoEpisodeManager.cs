@@ -303,11 +303,21 @@ public class AutoEpisodeManager : MonoBehaviour
     void StartTcpCommandWait()
     {
         if (!enableTcpGripForceControl || !waitForTcpCommandBeforeStart) return;
-        
+
         currentState = EpisodeState.WaitingForTcp;
         isWaitingForTcpCommand = true;
         tcpCommandWaitStartTime = Time.time;
-        
+
+        // Python側へ把持力リクエストを送信
+        if (a2cClient != null)
+        {
+            a2cClient.SendGripForceRequest();
+        }
+        else if (enableDebugLogs)
+        {
+            Debug.LogWarning("A2CClientが設定されていないため把持力リクエストを送信できません");
+        }
+
         if (enableDebugLogs)
         {
             Debug.Log($"🔥 TCP把持力指令を待機中... (タイムアウト: {tcpCommandWaitTimeout}秒)");
