@@ -4,6 +4,7 @@ import socket
 import threading
 import json
 import time
+import random
 
 
 
@@ -105,7 +106,22 @@ class UnityTCPInterface:
             print(f"❌ メッセージ送信エラー: {e}")
             self._disconnect()
             return False
-    
+
+    def handle_grip_force_requests(self, min_force=0.1, max_force=30.0):
+        """Unityからの把持力リクエストに応答しランダムな把持力を送信"""
+        while self.is_running:
+            if self.received_data:
+                data = self.received_data.popleft()
+                if isinstance(data, dict) and data.get('type') == 'request_grip_force':
+                    grip_force = random.uniform(min_force, max_force)
+                    response = {
+                        'type': 'grip_force_command',
+                        'target_force': grip_force
+                    }
+                    if self.send_message(response):
+                        print(f"📤 把持力送信: {grip_force:.2f}N")
+            time.sleep(0.01)
+
     def _disconnect(self):
         """接続を切断"""
         self.is_connected = False
@@ -132,3 +148,14 @@ class UnityTCPInterface:
             except:
                 pass
         print("🛑 Unity TCP サーバー停止")
+
+
+if __name__ == '__main__':
+    interface = UnityTCPInterface()
+    interface.start_server()
+    try:
+        interface.handle_grip_force_requests()
+    except KeyboardInterrupt:
+        print('🛑 デモ停止')
+    finally:
+        interface.stop_server()

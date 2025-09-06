@@ -697,6 +697,28 @@ public class AluminumCanA2CClient : MonoBehaviour
         string ts = DateTime.Now.ToString("HH:mm:ss.ff"); // ffで1/100秒（0.01s）
         Debug.Log($"[{ts}] 📤 エピソード結果送信: {resultMessage}");
     }
+
+    /// <summary>
+    /// Python側に把持力指令をリクエスト
+    /// </summary>
+    public void SendGripForceRequest()
+    {
+        if (!isConnected)
+        {
+            if (enableDebugLogs)
+            {
+                Debug.LogWarning("❌ 把持力リクエスト送信失敗: サーバーに接続されていません");
+            }
+            return;
+        }
+
+        SendMessage("REQUEST_GRIP_FORCE");
+
+        if (enableDebugLogs)
+        {
+            Debug.Log("📡 把持力リクエスト送信");
+        }
+    }
     
     #endregion
     
