@@ -9,6 +9,7 @@ using System.Text;
 using System.Threading;
 using UnityEngine;
 
+
 /// <summary>
 /// A2C強化学習サーバーとの通信クライアント
 /// AutoEpisodeManagerとの連携により把持力指令を受信・転送
@@ -242,6 +243,8 @@ public class AluminumCanA2CClient : MonoBehaviour
             }
         }
     }
+
+    
     
     /// <summary>
     /// 個別の把持力指令を処理
@@ -499,6 +502,11 @@ public class AluminumCanA2CClient : MonoBehaviour
         if (string.IsNullOrEmpty(message)) return;
         
         totalMessagesReceived++;
+
+        // 🔥 TCP指令を特定の状態でのみ処理
+        bool shouldProcessGripForce = enableGripForceReceiving && 
+                                 episodeManager != null && 
+                                 IsEpisodeManagerWaitingForTcp();
         
         if (enableVerboseReceiveLog)
         {
@@ -531,6 +539,26 @@ public class AluminumCanA2CClient : MonoBehaviour
         {
             // Debug.Log($"📨 メッセージ処理完了: {message}");
         }
+    }
+
+    /// <summary>
+    /// EpisodeManagerがTCP指令を待機中かチェック
+    /// </summary>
+    private bool IsEpisodeManagerWaitingForTcp()
+    {
+        if (episodeManager == null) return false;
+        
+        // リフレクションでprivateフィールドにアクセス
+        var stateField = episodeManager.GetType().GetField("currentState", 
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        
+        if (stateField != null)
+        {
+            var currentState = stateField.GetValue(episodeManager);
+            return currentState.ToString() == "WaitingForTcp";
+        }
+        
+        return false;
     }
     
     #endregion
