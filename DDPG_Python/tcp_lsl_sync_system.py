@@ -1,550 +1,685 @@
 #!/usr/bin/env python3
 """
-TCP-LSL時刻同期システム
-UnityからのTCP明示的フィードバックとLSL EEGデータの同期制御
+LSL-TCP同期エピソード収集システム
 
-主な機能:
-1. 高精度時刻同期（ハードウェアタイムスタンプ使用）
-2. TCP・LSLイベントの時刻対応付け
-3. 遅延補正とタイミング調整
-4. 同期データのCSV蓄積（1000回分）
+機能:
+1. LSL（EEG）データをeeg_receiver.pyで受信・eeg_neuroadaptation_preprocessor.pyで前処理
+2. TCP（Unity）データをunity_tcp_interface.pyで受信
+3. EPISODE_ENDトリガー受信時に、直前のJSONデータを採用
+4. トリガー時刻から3.2秒さかのぼって1.2秒分のLSLデータを抽出
+5. episode_idはJSONの'episode'フィールドの値を使用
+6. CSVファイルでの保存機能
+
+依存関係:
+- eeg_receiver.py (同一ディレクトリ)
+- eeg_neuroadaptation_preprocessor.py (同一ディレクトリ)  
+- unity_tcp_interface.py (同一ディレクトリ)
 """
 
+import numpy as np
+import pandas as pd
 import time
 import threading
 import queue
-import numpy as np
-from collections import deque, defaultdict
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
 import json
-import csv
 import os
 from datetime import datetime
+from collections import deque
+from typing import Dict, List, Optional, Tuple, Any
+from dataclasses import dataclass
 
-# 既存モジュールのインポート（プロジェクト内から）
-from envs.unity_tcp_interface import UnityTCPInterface
-from pylsl import StreamInlet, resolve_streams, local_clock
+# 同一ディレクトリのモジュールをインポート
+from eeg_receiver import LSLEEGReceiver, EEGDataProcessor
+from eeg_neuroadaptation_preprocessor import NeuroadaptationEEGPreprocessor
+from unity_tcp_interface import EEGTCPInterface
 
 @dataclass
-class SynchronizedEvent:
-    """同期イベントデータクラス"""
+class Episode:
+    """エピソードデータクラス"""
+    episode_id: int
+    trigger_timestamp: float
+    lsl_data: np.ndarray  # (samples, channels) - 1.2秒分の前処理済みEEGデータ
+    lsl_timestamps: np.ndarray  # LSLタイムスタンプ配列
+    tcp_data: Dict[str, Any]  # 直前のTCPデータ
     tcp_timestamp: float
-    lsl_timestamp: float
-    system_timestamp: float
-    tcp_data: dict
-    lsl_data: np.ndarray
-    event_type: str
-    feedback_value: float
-    sync_latency: float
-
-class TCPLSLSynchronizer:
-    """TCP-LSL時刻同期システム"""
+    sync_latency: float  # 同期遅延（ミリ秒）
+    preprocessing_info: Dict[str, Any]  # 前処理情報
+    
+class LSLTCPEpisodeCollector:
+    """LSL-TCP同期エピソード収集システム"""
     
     def __init__(self, 
-                 tcp_host='127.0.0.1', 
-                 tcp_port=12345,
                  lsl_stream_name='MockEEG',
-                 max_sync_events=1000,
-                 sync_tolerance_ms=50):
+                 tcp_host='127.0.0.1',
+                 tcp_port=12345,
+                 sampling_rate=250,
+                 lookback_seconds=3.2,
+                 episode_duration=1.2,
+                 max_buffer_seconds=10.0,
+                 save_to_csv=True,
+                 enable_realtime_processing=False):
         """
         初期化
         
         Args:
-            tcp_host: Unity TCP ホスト
-            tcp_port: Unity TCP ポート  
             lsl_stream_name: LSLストリーム名
-            max_sync_events: 最大同期イベント数
-            sync_tolerance_ms: 同期許容誤差（ミリ秒）
+            tcp_host: TCPホスト
+            tcp_port: TCPポート
+            sampling_rate: サンプリング周波数
+            lookback_seconds: トリガーからさかのぼる時間
+            episode_duration: エピソード長（秒）
+            max_buffer_seconds: 最大バッファ時間
         """
+        self.lsl_stream_name = lsl_stream_name
         self.tcp_host = tcp_host
         self.tcp_port = tcp_port
-        self.lsl_stream_name = lsl_stream_name
-        self.max_sync_events = max_sync_events
-        self.sync_tolerance = sync_tolerance_ms / 1000.0  # 秒に変換
+        self.sampling_rate = sampling_rate
+        self.lookback_seconds = lookback_seconds
+        self.episode_duration = episode_duration
+        self.save_to_csv = save_to_csv
+        self.enable_realtime_processing = enable_realtime_processing
+                
+        # サンプル数計算
+        self.lookback_samples = int(lookback_seconds * sampling_rate)  # 800サンプル
+        self.episode_samples = int(episode_duration * sampling_rate)   # 300サンプル
+        self.max_buffer_samples = int(max_buffer_seconds * sampling_rate)  # 2500サンプル
         
-        # システム開始時刻（すべての時刻の基準）
-        self.system_start_time = time.time()
-        self.lsl_start_time = None
+        # LSL受信システム
+        self.eeg_receiver = LSLEEGReceiver(stream_name=lsl_stream_name)
+        self.eeg_preprocessor = NeuroadaptationEEGPreprocessor(
+            sampling_rate=sampling_rate,
+            enable_asr=True,
+            enable_ica=False  # リアルタイム用に高速化
+        )
         
-        # 通信インターフェース
-        self.unity_tcp = UnityTCPInterface(tcp_host, tcp_port)
-        self.lsl_inlet = None
+        # TCP通信システム
+        self.tcp_interface = EEGTCPInterface(host=tcp_host, port=tcp_port)
         
-        # 時刻同期管理
-        self.tcp_event_buffer = deque(maxlen=1000)
-        self.lsl_event_buffer = deque(maxlen=1000) 
-        self.synchronized_events = deque(maxlen=max_sync_events)
+        # データバッファ
+        self.lsl_data_buffer = deque(maxlen=self.max_buffer_samples)
+        self.lsl_timestamp_buffer = deque(maxlen=self.max_buffer_samples)
+        self.tcp_data_buffer = deque(maxlen=1000)  # 最新1000件のTCPデータ
         
-        # 同期統計
-        self.sync_stats = {
-            'total_tcp_events': 0,
-            'total_lsl_events': 0, 
-            'successful_syncs': 0,
-            'failed_syncs': 0,
-            'avg_latency_ms': 0.0,
-            'max_latency_ms': 0.0,
-            'min_latency_ms': float('inf')
-        }
+        # エピソード管理
+        self.episodes = []
+        self.episode_counter = 0  # 参考用カウンター
+        self.trigger_queue = queue.Queue()
         
         # 実行制御
         self.is_running = False
         self.threads = []
+        self.buffer_lock = threading.Lock()
         
-        # CSV出力設定
+        # セッション情報
         self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.csv_filename = f"tcp_lsl_sync_data_{self.session_id}.csv"
+        self.output_dir = f"DDPG_Python/logs/episodes_{self.session_id}"
         
-        print(f"🔄 TCP-LSL同期システム初期化完了")
-        print(f"   📡 TCP: {tcp_host}:{tcp_port}")
-        print(f"   🧠 LSL: {lsl_stream_name}")
-        print(f"   ⏱️ 同期許容誤差: {sync_tolerance_ms}ms")
-        print(f"   📊 最大イベント数: {max_sync_events}")
-
-    def setup_lsl_connection(self) -> bool:
-        """LSLストリームへの接続を確立"""
-        try:
-            print(f"🔍 LSLストリーム '{self.lsl_stream_name}' を検索中...")
-            print("   使用予定: mock_eeg_sender.py からのストリーム")
-            
-            # プロジェクト内の既存コードと全く同じ方法を使用
-            from pylsl import resolve_streams
-            streams = resolve_streams()
-            
-            # 指定した名前のストリームを検索
-            target_stream = None
-            for stream in streams:
-                if stream.name() == self.lsl_stream_name:
-                    target_stream = stream
-                    break
-            
-            if target_stream is None:
-                print(f"❌ LSLストリーム '{self.lsl_stream_name}' が見つかりません")
-                if streams:
-                    print("利用可能なストリーム:")
-                    for stream in streams:
-                        print(f"  - {stream.name()} ({stream.type()})")
-                else:
-                    print("利用可能なストリームがありません")
-                print()
-                print("📝 mock_eeg_sender.py の実行手順:")
-                print("   1. 別ターミナルで: python lsl_mock_data_send_test/mock_eeg_sender.py")
-                print("   2. sender側で 'start' コマンドを実行")
-                print("   3. このスクリプトを再実行")
-                return False
-                
-            # ストリームに接続
-            self.lsl_inlet = StreamInlet(target_stream, max_buflen=360, 
-                                      max_chunklen=1, recover=True)
-            
-            # LSL時刻の基準を設定
-            self.lsl_start_time = local_clock()
-            
-            # ストリーム情報を表示
-            info = self.lsl_inlet.info()
-            print(f"✅ LSLストリーム接続成功")
-            print(f"   ストリーム名: {info.name()}")
-            print(f"   チャンネル数: {info.channel_count()}")
-            print(f"   サンプリング周波数: {info.nominal_srate()}Hz")
-            print(f"   データ形式: {info.channel_format()}")
-            
-            return True
-            
-        except ImportError as e:
-            print(f"❌ pylslインポートエラー: {e}")
-            print("   pip install pylsl")
+        # 統計情報
+        self.stats = {
+            'total_triggers': 0,
+            'successful_episodes': 0,
+            'failed_episodes': 0,
+            'avg_sync_latency_ms': 0.0,
+            'start_time': None
+        }
+        
+        print(f"🧠 LSL-TCP同期エピソード収集システム初期化完了")
+        print(f"   セッションID: {self.session_id}")
+        print(f"   ルックバック: {lookback_seconds}秒 ({self.lookback_samples}サンプル)")
+        print(f"   エピソード長: {episode_duration}秒 ({self.episode_samples}サンプル)")
+        print(f"   出力ディレクトリ: {self.output_dir}")
+    
+    def start_collection(self):
+        """データ収集開始"""
+        print(f"🚀 データ収集開始")
+        
+        # 出力ディレクトリ作成
+        os.makedirs(self.output_dir, exist_ok=True)
+        
+        # LSL接続
+        if not self.eeg_receiver.connect_to_stream():
+            print(f"❌ LSL接続失敗")
             return False
-        except Exception as e:
-            print(f"❌ LSL接続エラー: {e}")
-            print("   pylslが正しくインストールされているか確認してください")
+        
+        # TCP接続
+        if not self.tcp_interface.start_server():
+            print(f"❌ TCP接続失敗")
             return False
-
-    def calculate_time_offset(self) -> float:
-        """システム時刻とLSL時刻のオフセットを計算"""
-        if self.lsl_start_time is None:
-            return 0.0
-            
-        system_time = time.time()
-        lsl_time = local_clock()
         
-        # オフセット計算（LSL時刻をシステム時刻に変換するため）
-        offset = system_time - lsl_time
-        return offset
-
-    def tcp_receiver_thread(self):
-        """TCPデータ受信スレッド"""
-        print("🚀 TCP受信スレッド開始")
+        # TCPメッセージコールバック設定
+        self.tcp_interface.add_message_callback(self._on_tcp_message_received)
         
-        while self.is_running:
-            try:
-                if self.unity_tcp.received_data:
-                    # 新しいTCPデータを取得
-                    tcp_data = self.unity_tcp.received_data.popleft()
-                    receive_time = time.time()
-                    
-                    # TCPタイムスタンプを取得（Unity側から送信された時刻）
-                    tcp_timestamp = tcp_data.get('timestamp', receive_time)
-                    
-                    # TCPイベントをバッファに追加
-                    tcp_event = {
-                        'timestamp': tcp_timestamp,
-                        'system_time': receive_time,
-                        'data': tcp_data,
-                        'type': tcp_data.get('type', 'unknown')
-                    }
-                    
-                    self.tcp_event_buffer.append(tcp_event)
-                    self.sync_stats['total_tcp_events'] += 1
-                    
-                    # デバッグ出力
-                    if tcp_data.get('type') == 'feedback':
-                        print(f"📨 TCP フィードバック受信: {tcp_data}")
-                
-                time.sleep(0.001)  # 1ms間隔でチェック
-                
-            except Exception as e:
-                if self.is_running:
-                    print(f"❌ TCP受信エラー: {e}")
-
-    def lsl_receiver_thread(self):
-        """LSLデータ受信スレッド"""
-        print("🚀 LSL受信スレッド開始")
-        
-        if not self.lsl_inlet:
-            print("❌ LSL inlet が初期化されていません")
-            return
-            
-        while self.is_running:
-            try:
-                # LSLサンプルを取得
-                sample, lsl_timestamp = self.lsl_inlet.pull_sample(timeout=1.0)
-                
-                if sample is not None:
-                    # システム時刻に変換
-                    time_offset = self.calculate_time_offset()
-                    system_timestamp = lsl_timestamp + time_offset
-                    
-                    # LSLイベントをバッファに追加
-                    lsl_event = {
-                        'lsl_timestamp': lsl_timestamp,
-                        'system_timestamp': system_timestamp,
-                        'sample': np.array(sample),
-                        'receive_time': time.time()
-                    }
-                    
-                    self.lsl_event_buffer.append(lsl_event)
-                    self.sync_stats['total_lsl_events'] += 1
-                    
-                    # 100サンプルごとにデバッグ出力
-                    if self.sync_stats['total_lsl_events'] % 100 == 0:
-                        print(f"🧠 LSL受信済み: {self.sync_stats['total_lsl_events']} samples")
-                        
-            except Exception as e:
-                if self.is_running:
-                    print(f"❌ LSL受信エラー: {e}")
-
-    def synchronization_thread(self):
-        """時刻同期処理スレッド"""
-        print("🚀 時刻同期スレッド開始")
-        
-        while self.is_running:
-            try:
-                self._process_synchronization()
-                time.sleep(0.010)  # 10ms間隔で同期処理
-                
-            except Exception as e:
-                if self.is_running:
-                    print(f"❌ 同期処理エラー: {e}")
-
-    def _process_synchronization(self):
-        """同期処理のメインロジック"""
-        # TCPイベントがある場合のみ処理
-        if not self.tcp_event_buffer:
-            return
-            
-        # 最新のTCPイベントを取得し、処理済みバッファから除去
-        tcp_event = self.tcp_event_buffer.popleft()
-        tcp_time = tcp_event['system_time']
-        
-        # 対応するLSLデータを検索
-        best_lsl_event = self._find_closest_lsl_event(tcp_time)
-        
-        if best_lsl_event is not None:
-            # 使ったLSLイベントをバッファから削除
-            try:
-                self.lsl_event_buffer.remove(best_lsl_event)
-            except ValueError:
-                pass
-
-            # 同期イベントを作成
-            sync_event = self._create_synchronized_event(tcp_event, best_lsl_event)
-            
-            if sync_event:
-                self.synchronized_events.append(sync_event)
-                self.sync_stats['successful_syncs'] += 1
-                
-                # 統計更新
-                self._update_sync_statistics(sync_event)
-                
-                # CSVに保存（1000回分蓄積）
-                self._save_to_csv(sync_event)
-                
-                print(f"✅ 同期成功 [{self.sync_stats['successful_syncs']:4d}]: "
-                      f"遅延={sync_event.sync_latency*1000:.1f}ms, "
-                      f"フィードバック={sync_event.feedback_value:.3f}")
-
-    def _find_closest_lsl_event(self, target_time: float) -> Optional[dict]:
-        """指定時刻に最も近いLSLイベントを検索"""
-        if not self.lsl_event_buffer:
-            return None
-            
-        best_event = None
-        min_time_diff = float('inf')
-        
-        for lsl_event in self.lsl_event_buffer:
-            time_diff = abs(lsl_event['system_timestamp'] - target_time)
-            
-            # 同期許容誤差以内で最も近いイベントを選択
-            if time_diff < self.sync_tolerance and time_diff < min_time_diff:
-                min_time_diff = time_diff
-                best_event = lsl_event
-                
-        return best_event
-
-    def _create_synchronized_event(self, tcp_event: dict, lsl_event: dict) -> Optional[SynchronizedEvent]:
-        """同期イベントを作成"""
-        try:
-            # フィードバック値を抽出
-            feedback_value = self._extract_feedback_value(tcp_event['data'])
-            
-            # 同期遅延を計算
-            sync_latency = abs(lsl_event['system_timestamp'] - tcp_event['system_time'])
-            
-            sync_event = SynchronizedEvent(
-                tcp_timestamp=tcp_event['timestamp'],
-                lsl_timestamp=lsl_event['lsl_timestamp'],
-                system_timestamp=tcp_event['system_time'],
-                tcp_data=tcp_event['data'],
-                lsl_data=lsl_event['sample'],
-                event_type=tcp_event['type'],
-                feedback_value=feedback_value,
-                sync_latency=sync_latency
-            )
-            
-            return sync_event
-            
-        except Exception as e:
-            print(f"❌ 同期イベント作成エラー: {e}")
-            return None
-
-    def _extract_feedback_value(self, tcp_data: dict) -> float:
-        """TCPデータからフィードバック値を抽出"""
-        # フィードバック値の候補キーをチェック
-        feedback_keys = ['feedback', 'value', 'reward', 'error', 'grip_force']
-        
-        for key in feedback_keys:
-            if key in tcp_data:
-                value = tcp_data[key]
-                if isinstance(value, (int, float)):
-                    return float(value)
-                elif isinstance(value, str):
-                    try:
-                        return float(value)
-                    except ValueError:
-                        pass
-                        
-        # テキスト解析でフィードバックを判定
-        text_data = str(tcp_data).lower()
-        if any(word in text_data for word in ['success', 'good', 'correct']):
-            return 1.0
-        elif any(word in text_data for word in ['error', 'fail', 'bad']):
-            return -1.0
-        else:
-            return 0.0
-
-    def _update_sync_statistics(self, sync_event: SynchronizedEvent):
-        """同期統計を更新"""
-        latency_ms = sync_event.sync_latency * 1000
-        
-        # 遅延統計の更新
-        if latency_ms > self.sync_stats['max_latency_ms']:
-            self.sync_stats['max_latency_ms'] = latency_ms
-        if latency_ms < self.sync_stats['min_latency_ms']:
-            self.sync_stats['min_latency_ms'] = latency_ms
-            
-        # 平均遅延の更新
-        total_syncs = self.sync_stats['successful_syncs']
-        current_avg = self.sync_stats['avg_latency_ms']
-        new_avg = (current_avg * (total_syncs - 1) + latency_ms) / total_syncs
-        self.sync_stats['avg_latency_ms'] = new_avg
-
-    def _save_to_csv(self, sync_event: SynchronizedEvent):
-        """同期イベントをCSVに保存"""
-        try:
-            file_exists = os.path.exists(self.csv_filename)
-            
-            with open(self.csv_filename, 'a', newline='', encoding='utf-8') as f:
-                fieldnames = [
-                    'event_id', 'tcp_timestamp', 'lsl_timestamp', 'system_timestamp',
-                    'event_type', 'feedback_value', 'sync_latency_ms',
-                    'tcp_data_json', 'lsl_channels', 'session_id'
-                ]
-                
-                writer = csv.DictWriter(f, fieldnames=fieldnames)
-                
-                if not file_exists:
-                    writer.writeheader()
-                
-                writer.writerow({
-                    'event_id': self.sync_stats['successful_syncs'],
-                    'tcp_timestamp': sync_event.tcp_timestamp,
-                    'lsl_timestamp': sync_event.lsl_timestamp,
-                    'system_timestamp': sync_event.system_timestamp,
-                    'event_type': sync_event.event_type,
-                    'feedback_value': sync_event.feedback_value,
-                    'sync_latency_ms': sync_event.sync_latency * 1000,
-                    'tcp_data_json': json.dumps(sync_event.tcp_data),
-                    'lsl_channels': len(sync_event.lsl_data),
-                    'session_id': self.session_id
-                })
-                
-        except Exception as e:
-            print(f"❌ CSV保存エラー: {e}")
-
-    def start_synchronization_system(self):
-        """同期システム開始"""
-        if self.is_running:
-            print("⚠️ システムは既に実行中です")
-            return
-            
-        print("🚀 TCP-LSL同期システム開始")
-        
-        # LSL接続を確立
-        if not self.setup_lsl_connection():
-            print("❌ LSL接続に失敗しました。システムを終了します。")
-            return
-            
-        # Unity TCP サーバー開始
-        self.unity_tcp.start_server()
-        
-        # 実行フラグを設定
+        # 実行フラグ設定
         self.is_running = True
+        self.stats['start_time'] = time.time()
         
         # スレッド開始
-        threads_config = [
-            ("TCP受信", self.tcp_receiver_thread),
-            ("LSL受信", self.lsl_receiver_thread), 
-            ("時刻同期", self.synchronization_thread)
-        ]
+        self._start_threads()
         
-        for name, target in threads_config:
-            thread = threading.Thread(target=target, name=name)
-            thread.daemon = True
-            thread.start()
-            self.threads.append(thread)
-            
-        print(f"✅ 同期システム開始完了")
-        print(f"📁 同期データ保存先: {self.csv_filename}")
+        print(f"✅ データ収集開始完了")
+        print(f"💡 トリガー待機中... (EPISODE_ENDでエピソード収集)")
         
         return True
-
-    def stop_synchronization_system(self):
-        """同期システム停止"""
-        print("🛑 TCP-LSL同期システム停止中...")
+    
+    def _start_threads(self):
+        """各種スレッドを開始"""
+        # LSLデータ受信スレッド
+        lsl_thread = threading.Thread(target=self._lsl_data_thread, daemon=True)
+        lsl_thread.start()
+        self.threads.append(lsl_thread)
+        
+        # TCP監視スレッド（unity_tcp_interfaceの受信データを監視）
+        tcp_monitor_thread = threading.Thread(target=self._tcp_monitor_thread, daemon=True)
+        tcp_monitor_thread.start()
+        self.threads.append(tcp_monitor_thread)
+        
+        # エピソード処理スレッド
+        episode_thread = threading.Thread(target=self._episode_processing_thread, daemon=True)
+        episode_thread.start()
+        self.threads.append(episode_thread)
+        
+        print(f"🔄 バックグラウンドスレッド開始完了")
+    
+    def _tcp_monitor_thread(self):
+        """TCP受信データ監視スレッド"""
+        print(f"📡 TCP監視スレッド開始")
+        last_tcp_buffer_size = 0
+        
+        while self.is_running:
+            try:
+                # unity_tcp_interfaceの受信データを監視
+                current_tcp_buffer_size = len(self.tcp_interface.received_data)
+                
+                if current_tcp_buffer_size > last_tcp_buffer_size:
+                    # 新しいデータが受信された
+                    new_messages = list(self.tcp_interface.received_data)[last_tcp_buffer_size:]
+                    
+                    for message_data in new_messages:
+                        self._process_tcp_message(message_data)
+                    
+                    last_tcp_buffer_size = current_tcp_buffer_size
+                
+                time.sleep(0.1)  # 100ms間隔で監視
+                
+            except Exception as e:
+                if self.is_running:
+                    print(f"⚠️ TCP監視エラー: {e}")
+                time.sleep(0.1)
+        
+        print(f"📡 TCP監視スレッド終了")
+    
+    def _process_tcp_message(self, message_data):
+        """TCPメッセージの処理"""
+        print(f"🚨 TCP監視: message_data={message_data}")
+        tcp_timestamp = time.time()
+        
+        # メッセージの内容をチェック
+        message_content = None
+        
+        if isinstance(message_data, str):
+            message_content = message_data.strip()
+        elif isinstance(message_data, dict):
+            # 辞書の中に'content'や'message'キーがある場合
+            if 'content' in message_data:
+                message_content = message_data['content'].strip()
+            elif 'message' in message_data:
+                message_content = message_data['message'].strip()
+            elif message_data.get('type') == 'text_message' and 'content' in message_data:
+                message_content = message_data['content'].strip()
+            # JSONデータ（ロボット状態）の場合
+            elif self._is_robot_state_data(message_data):
+                message_content = None  # ロボット状態データはEPISODE_ENDではない
+        
+        print(f"🔍 抽出されたメッセージ内容: '{message_content}'")
+        
+        # EPISODE_ENDトリガーの処理
+        if message_content == "EPISODE_END":
+            print(f"🎯 EPISODE_ENDトリガー検出")
+            
+            # 直前のJSONデータを検索
+            previous_json_data = self._get_previous_json_data()
+            if previous_json_data:
+                robot_episode_id = previous_json_data.get('episode', 'unknown')
+                print(f"📋 直前のJSONデータを採用: episode={robot_episode_id}")
+                
+                trigger_info = {
+                    'tcp_data': previous_json_data,  # 直前のJSONデータを使用
+                    'tcp_timestamp': tcp_timestamp,  # EPISODE_END受信時刻
+                    'trigger_timestamp': tcp_timestamp,
+                    'trigger_type': 'EPISODE_END'
+                }
+                self.trigger_queue.put(trigger_info)
+                self.stats['total_triggers'] += 1
+                print(f"✅ トリガー情報をキューに追加しました")
+            else:
+                print(f"⚠️ 直前のJSONデータが見つかりません")
+                # デバッグ用：バッファの内容を確認
+                print(f"🔍 TCPバッファサイズ: {len(self.tcp_data_buffer)}")
+                for i, entry in enumerate(list(self.tcp_data_buffer)[-5:]):
+                    print(f"  バッファ[{i}]: {entry['data']}")
+            return
+        
+        # ロボット状態データの処理
+        if isinstance(message_data, dict) and self._is_robot_state_data(message_data):
+            # TCPデータをバッファに追加
+            tcp_entry = {
+                'data': message_data,
+                'timestamp': tcp_timestamp
+            }
+            self.tcp_data_buffer.append(tcp_entry)
+            
+            robot_episode = message_data.get('episode', 'unknown')
+            grip_force = message_data.get('grip_force', 'unknown')
+            print(f"📋 ロボット状態データ受信: episode={robot_episode}, grip_force={grip_force}")
+        
+        # その他のメッセージもバッファに追加
+        tcp_entry = {
+            'data': message_data if isinstance(message_data, dict) else {'type': 'text_message', 'content': str(message_data)},
+            'timestamp': tcp_timestamp
+        }
+        self.tcp_data_buffer.append(tcp_entry)
+    
+    def _lsl_data_thread(self):
+        """LSLデータ受信スレッド"""
+        print(f"📡 LSLデータ受信開始")
+        
+        while self.is_running:
+            try:
+                # LSLからサンプル取得
+                sample, timestamp = self.eeg_receiver.inlet.pull_sample(timeout=1.0)
+                
+                if sample is not None:
+                    with self.buffer_lock:
+                        # 32チャンネルに正規化
+                        if len(sample) >= 32:
+                            normalized_sample = sample[:32]
+                        else:
+                            normalized_sample = sample + [0.0] * (32 - len(sample))
+                        
+                        # バッファに追加
+                        self.lsl_data_buffer.append(normalized_sample)
+                        self.lsl_timestamp_buffer.append(timestamp)
+                
+            except Exception as e:
+                if self.is_running:
+                    print(f"⚠️ LSLデータ受信エラー: {e}")
+                time.sleep(0.001)
+        
+        print(f"📡 LSLデータ受信終了")
+    
+    def _on_tcp_message_received(self, message_data: Dict[str, Any]):
+        """TCP メッセージ受信時のコールバック"""
+        tcp_timestamp = time.time()
+        
+        # 文字列メッセージの場合（EPISODE_ENDなど）
+        if isinstance(message_data, str):
+            message_str = message_data.strip()
+            if message_str == "EPISODE_END":
+                print(f"🎯 EPISODE_ENDトリガー検出")
+                
+                # 直前のJSONデータを検索
+                previous_json_data = self._get_previous_json_data()
+                if previous_json_data:
+                    robot_episode_id = previous_json_data.get('episode', 'unknown')
+                    print(f"📋 直前のJSONデータを採用: episode={robot_episode_id}")
+                    
+                    trigger_info = {
+                        'tcp_data': previous_json_data,  # 直前のJSONデータを使用
+                        'tcp_timestamp': tcp_timestamp,  # EPISODE_END受信時刻
+                        'trigger_timestamp': tcp_timestamp,
+                        'trigger_type': 'EPISODE_END'
+                    }
+                    self.trigger_queue.put(trigger_info)
+                    self.stats['total_triggers'] += 1
+                else:
+                    print(f"⚠️ 直前のJSONデータが見つかりません")
+            return
+        
+        # 辞書型メッセージの場合（ロボット状態データ）
+        if isinstance(message_data, dict):
+            # TCPデータをバッファに追加
+            tcp_entry = {
+                'data': message_data,
+                'timestamp': tcp_timestamp
+            }
+            self.tcp_data_buffer.append(tcp_entry)
+            
+            # ロボット状態データかをチェック
+            if self._is_robot_state_data(message_data):
+                robot_episode = message_data.get('episode', 'unknown')
+                grip_force = message_data.get('grip_force', 'unknown')
+                print(f"📋 ロボット状態データ受信: episode={robot_episode}, grip_force={grip_force}")
+    
+    def _get_previous_json_data(self) -> Optional[Dict[str, Any]]:
+        """直前のJSONデータ（ロボット状態データ）を取得"""
+        # TCPバッファを逆順で検索
+        for tcp_entry in reversed(list(self.tcp_data_buffer)):
+            data = tcp_entry['data']
+            
+            # JSONデータ（辞書型）でロボット状態データの場合
+            if (isinstance(data, dict) and self._is_robot_state_data(data)):
+                return data
+        
+        return None
+    
+    def _is_robot_state_data(self, data: Dict[str, Any]) -> bool:
+        """ロボット状態データかを判定"""
+        # 必要なキーが含まれているかチェック
+        required_keys = ['episode', 'position', 'velocity', 'grip_force']
+        return all(key in data for key in required_keys)
+    
+    def _episode_processing_thread(self):
+        """エピソード処理スレッド"""
+        print(f"⚡ エピソード処理スレッド開始")
+        
+        while self.is_running:
+            try:
+                # トリガー待機（タイムアウト1秒）
+                trigger_info = self.trigger_queue.get(timeout=1.0)
+                
+                # エピソード生成を試行
+                episode = self._create_episode(trigger_info)
+                
+                if episode:
+                    self.episodes.append(episode)
+                    self.stats['successful_episodes'] += 1
+                    
+                    # CSVファイルに保存
+                    self._save_episode_to_csv(episode)
+                    
+                    print(f"✅ エピソード{episode.episode_id}保存完了 "
+                          f"(同期遅延: {episode.sync_latency:.1f}ms)")
+                else:
+                    self.stats['failed_episodes'] += 1
+                    print(f"❌ エピソード作成失敗")
+                
+            except queue.Empty:
+                continue
+            except Exception as e:
+                print(f"⚠️ エピソード処理エラー: {e}")
+        
+        print(f"⚡ エピソード処理スレッド終了")
+    
+    def _create_episode(self, trigger_info: Dict[str, Any]) -> Optional[Episode]:
+        """トリガー情報からエピソードを作成"""
+        trigger_timestamp = trigger_info['trigger_timestamp']
+        tcp_data = trigger_info['tcp_data']
+        tcp_timestamp = trigger_info['tcp_timestamp']
+        
+        with self.buffer_lock:
+            # 十分なLSLデータがあるかチェック
+            if len(self.lsl_data_buffer) < self.episode_samples:
+                print(f"⚠️ LSLデータ不足: {len(self.lsl_data_buffer)}/{self.episode_samples}")
+                return None
+            
+            # トリガー時刻に最も近いLSLタイムスタンプを検索
+            timestamps = list(self.lsl_timestamp_buffer)
+            time_diffs = [abs(ts - trigger_timestamp) for ts in timestamps]
+            
+            if not time_diffs:
+                return None
+            
+            # 最も近いタイムスタンプのインデックス
+            closest_idx = time_diffs.index(min(time_diffs))
+            sync_latency = min(time_diffs) * 1000  # ミリ秒に変換
+            
+            # 3.2秒さかのぼって1.2秒分のデータを抽出
+            lookback_start_idx = max(0, closest_idx - self.lookback_samples)
+            episode_start_idx = lookback_start_idx
+            episode_end_idx = min(len(self.lsl_data_buffer), 
+                                episode_start_idx + self.episode_samples)
+            
+            # データが不足している場合
+            if episode_end_idx - episode_start_idx < self.episode_samples:
+                print(f"⚠️ エピソードデータ不足: {episode_end_idx - episode_start_idx}/{self.episode_samples}")
+                return None
+            
+            # EEGデータ抽出
+            raw_eeg_data = np.array([
+                self.lsl_data_buffer[i] 
+                for i in range(episode_start_idx, episode_end_idx)
+            ])
+            
+            # タイムスタンプ抽出
+            eeg_timestamps = np.array([
+                self.lsl_timestamp_buffer[i]
+                for i in range(episode_start_idx, episode_end_idx)
+            ])
+        
+        # 前処理実行
+        try:
+            preprocessing_result = self.eeg_preprocessor.preprocess_epoch(raw_eeg_data)
+            processed_eeg = preprocessing_result['processed_epoch']
+            preprocessing_info = {
+                'processing_time_ms': preprocessing_result['processing_time_ms'],
+                'quality_metrics': preprocessing_result['quality_metrics'],
+                'rejected_channels': preprocessing_result.get('rejected_channels', [])
+            }
+        except Exception as e:
+            print(f"⚠️ 前処理エラー: {e}")
+            # 前処理失敗時は生データを使用
+            processed_eeg = raw_eeg_data
+            preprocessing_info = {'error': str(e)}
+        
+        # episode_idは送信されたJSONデータの'episode'フィールドから取得
+        json_episode_id = tcp_data.get('episode', self.episode_counter)
+        
+        # エピソード作成
+        episode = Episode(
+            episode_id=json_episode_id,  # JSONから取得したepisode番号を使用
+            trigger_timestamp=trigger_timestamp,
+            lsl_data=processed_eeg,
+            lsl_timestamps=eeg_timestamps,
+            tcp_data=tcp_data,
+            tcp_timestamp=tcp_timestamp,
+            sync_latency=sync_latency,
+            preprocessing_info=preprocessing_info
+        )
+        
+        # EPISODE_ENDトリガーの場合は詳細情報を表示
+        if trigger_info.get('trigger_type') == 'EPISODE_END':
+            print(f"📝 EPISODE_ENDトリガーでエピソード作成:")
+            print(f"   ロボットエピソード番号: {json_episode_id}")
+            print(f"   把持力: {tcp_data.get('grip_force', 'unknown')}N")
+            print(f"   位置: {tcp_data.get('position', 'unknown')}")
+            print(f"   接触状態: {tcp_data.get('contact', 'unknown')}")
+        
+        # カウンターは参考用として保持
+        self.episode_counter += 1
+        
+        return episode
+    
+    def _save_episode_to_csv(self, episode: Episode):
+        """エピソードをCSVファイルに保存"""
+        try:
+            # エピソード基本情報のCSV
+            episode_info_file = os.path.join(self.output_dir, f"episode_{episode.episode_id:04d}_info.csv")
+            info_data = {
+                'episode_id': [episode.episode_id],
+                'trigger_timestamp': [episode.trigger_timestamp],
+                'tcp_timestamp': [episode.tcp_timestamp],
+                'sync_latency_ms': [episode.sync_latency],
+                'tcp_message_type': [episode.tcp_data.get('type', 'robot_state')],
+                'robot_episode': [episode.tcp_data.get('episode', 'unknown')],
+                'robot_position_x': [episode.tcp_data.get('position', [0,0,0])[0] if episode.tcp_data.get('position') else 0],
+                'robot_position_y': [episode.tcp_data.get('position', [0,0,0])[1] if episode.tcp_data.get('position') else 0],
+                'robot_position_z': [episode.tcp_data.get('position', [0,0,0])[2] if episode.tcp_data.get('position') else 0],
+                'robot_velocity_x': [episode.tcp_data.get('velocity', [0,0,0])[0] if episode.tcp_data.get('velocity') else 0],
+                'robot_velocity_y': [episode.tcp_data.get('velocity', [0,0,0])[1] if episode.tcp_data.get('velocity') else 0],
+                'robot_velocity_z': [episode.tcp_data.get('velocity', [0,0,0])[2] if episode.tcp_data.get('velocity') else 0],
+                'grip_force': [episode.tcp_data.get('grip_force', 0)],
+                'actual_grip_force': [episode.tcp_data.get('actual_grip_force', 0)],
+                'tcp_grip_force': [episode.tcp_data.get('tcp_grip_force', 0)],
+                'contact': [episode.tcp_data.get('contact', False)],
+                'contact_force': [episode.tcp_data.get('contact_force', 0)],
+                'broken': [episode.tcp_data.get('broken', False)],
+                'deformation': [episode.tcp_data.get('deformation', 0)],
+                'tcp_data_json': [json.dumps(episode.tcp_data)],
+                'preprocessing_time_ms': [episode.preprocessing_info.get('processing_time_ms', 0)],
+                'rejected_channels': [str(episode.preprocessing_info.get('rejected_channels', []))]
+            }
+            pd.DataFrame(info_data).to_csv(episode_info_file, index=False)
+            
+            # LSLデータのCSV
+            eeg_data_file = os.path.join(self.output_dir, f"episode_{episode.episode_id:04d}_eeg.csv")
+            eeg_df = pd.DataFrame(episode.lsl_data)
+            eeg_df.columns = [f'ch_{i:02d}' for i in range(episode.lsl_data.shape[1])]
+            eeg_df['timestamp'] = episode.lsl_timestamps
+            eeg_df['sample_index'] = range(len(eeg_df))
+            eeg_df.to_csv(eeg_data_file, index=False)
+            
+            # 統合サマリーCSV（全エピソード）
+            summary_file = os.path.join(self.output_dir, "episodes_summary.csv")
+            summary_data = {
+                'episode_id': episode.episode_id,
+                'trigger_timestamp': episode.trigger_timestamp,
+                'tcp_timestamp': episode.tcp_timestamp,
+                'sync_latency_ms': episode.sync_latency,
+                'tcp_message_type': episode.tcp_data.get('type', 'robot_state'),
+                'robot_episode': episode.tcp_data.get('episode', 'unknown'),
+                'grip_force': episode.tcp_data.get('grip_force', 0),
+                'actual_grip_force': episode.tcp_data.get('actual_grip_force', 0),
+                'contact': episode.tcp_data.get('contact', False),
+                'contact_force': episode.tcp_data.get('contact_force', 0),
+                'broken': episode.tcp_data.get('broken', False),
+                'eeg_samples': episode.lsl_data.shape[0],
+                'eeg_channels': episode.lsl_data.shape[1],
+                'processing_time_ms': episode.preprocessing_info.get('processing_time_ms', 0)
+            }
+            
+            # ファイルが存在しない場合はヘッダー付きで作成
+            if not os.path.exists(summary_file):
+                pd.DataFrame([summary_data]).to_csv(summary_file, index=False)
+            else:
+                pd.DataFrame([summary_data]).to_csv(summary_file, mode='a', header=False, index=False)
+            
+        except Exception as e:
+            print(f"⚠️ CSV保存エラー: {e}")
+    
+    def stop_collection(self):
+        """データ収集停止"""
+        print(f"🛑 データ収集停止中...")
         
         self.is_running = False
         
-        # Unity TCP停止
-        self.unity_tcp.stop_server()
+        # TCP接続停止
+        self.tcp_interface.stop_server()
         
-        # スレッド終了を待機
-        for thread in self.threads:
-            thread.join(timeout=2.0)
-            
-        # 最終統計を表示
+        # 最終統計表示
         self._print_final_statistics()
         
-        print("✅ TCP-LSL同期システム停止完了")
-
+        print(f"🛑 データ収集停止完了")
+    
     def _print_final_statistics(self):
-        """最終統計を表示"""
-        stats = self.sync_stats
-        print(f"\n{'='*60}")
-        print(f"📊 TCP-LSL同期システム 最終統計")
-        print(f"{'='*60}")
-        print(f"総TCPイベント数     : {stats['total_tcp_events']:,}")
-        print(f"総LSLイベント数     : {stats['total_lsl_events']:,}")
-        print(f"同期成功数          : {stats['successful_syncs']:,}")
-        print(f"同期失敗数          : {stats['failed_syncs']:,}")
+        """最終統計情報の表示"""
+        if self.stats['start_time']:
+            total_time = time.time() - self.stats['start_time']
+        else:
+            total_time = 0
         
-        if stats['successful_syncs'] > 0:
-            success_rate = (stats['successful_syncs'] / stats['total_tcp_events']) * 100
-            print(f"同期成功率          : {success_rate:.1f}%")
-            print(f"平均同期遅延        : {stats['avg_latency_ms']:.2f}ms")
-            print(f"最大同期遅延        : {stats['max_latency_ms']:.2f}ms") 
-            print(f"最小同期遅延        : {stats['min_latency_ms']:.2f}ms")
+        if self.stats['successful_episodes'] > 0:
+            avg_latency = sum(ep.sync_latency for ep in self.episodes) / len(self.episodes)
+        else:
+            avg_latency = 0
         
-        print(f"セッションID        : {self.session_id}")
-        print(f"CSVファイル         : {self.csv_filename}")
-        print(f"{'='*60}")
-
-    def run_data_collection_session(self, duration_seconds=300):
-        """データ収集セッションの実行（1000回分のデータ収集を目標）"""
-        if not self.start_synchronization_system():
+        print(f"\n📊 データ収集統計:")
+        print(f"   セッション時間     : {total_time:.1f}秒")
+        print(f"   総トリガー数       : {self.stats['total_triggers']}")
+        print(f"   成功エピソード数   : {self.stats['successful_episodes']}")
+        print(f"   失敗エピソード数   : {self.stats['failed_episodes']}")
+        if self.stats['total_triggers'] > 0:
+            success_rate = self.stats['successful_episodes'] / self.stats['total_triggers'] * 100
+            print(f"   成功率             : {success_rate:.1f}%")
+        print(f"   平均同期遅延       : {avg_latency:.1f}ms")
+        print(f"   出力ディレクトリ   : {self.output_dir}")
+    
+    def run_demo(self):
+        """デモ実行（単体動作テスト用）"""
+        print(f"🚀 LSL-TCP同期エピソード収集デモ開始")
+        
+        # データ収集開始
+        if not self.start_collection():
+            print(f"❌ システム開始失敗")
             return
-            
-        print(f"⏱️ データ収集セッション開始: {duration_seconds}秒間")
-        print(f"🎯 目標: {self.max_sync_events}回分の同期データ収集")
-        
-        start_time = time.time()
-        last_report_time = start_time
         
         try:
-            while time.time() - start_time < duration_seconds and self.is_running:
-                current_time = time.time()
+            print(f"\n💡 デモ実行中:")
+            print(f"   1. LSLデータ受信中（{self.lsl_stream_name}）")
+            print(f"   2. TCP待機中（{self.tcp_host}:{self.tcp_port}）")
+            print(f"   3. EPISODE_ENDでエピソード収集")
+            print(f"   4. Ctrl+C で終了")
+            print(f"\n📝 Unity側でTCPメッセージを送信してください:")
+            print(f"   1. ロボット状態データ（10回程度）:")
+            print(f"      {{\"episode\": 1, \"grip_force\": 10.5, \"position\": [0,0,0], ...}}")
+            print(f"   2. エピソード終了トリガー:")
+            print(f"      \"EPISODE_END\"")
+            print(f"   → 直前のロボット状態データとLSLデータを組み合わせてエピソード保存")
+            
+            # メインループ
+            while self.is_running:
+                time.sleep(1.0)
                 
-                # 10秒ごとに進捗報告
-                if current_time - last_report_time >= 10:
-                    elapsed = current_time - start_time
-                    remaining = duration_seconds - elapsed
-                    progress = (self.sync_stats['successful_syncs'] / self.max_sync_events) * 100
-                    
-                    print(f"📈 進捗: {elapsed:.0f}秒経過 | "
-                          f"同期済み: {self.sync_stats['successful_syncs']}/{self.max_sync_events} "
-                          f"({progress:.1f}%) | "
-                          f"残り: {remaining:.0f}秒")
-                    
-                    last_report_time = current_time
-                
-                # 目標数に達した場合は終了
-                if self.sync_stats['successful_syncs'] >= self.max_sync_events:
-                    print(f"🎉 目標達成! {self.max_sync_events}回分のデータ収集完了")
-                    break
-                    
-                time.sleep(1)
+                # 5秒ごとに状態表示
+                if int(time.time()) % 5 == 0:
+                    lsl_buffer_size = len(self.lsl_data_buffer)
+                    tcp_buffer_size = len(self.tcp_data_buffer)
+                    print(f"💻 状態: LSL={lsl_buffer_size}サンプル, "
+                          f"TCP={tcp_buffer_size}メッセージ, "
+                          f"エピソード={self.stats['successful_episodes']}件")
                 
         except KeyboardInterrupt:
-            print("\n⏸️ ユーザー中断")
+            print(f"\n⏹️ デモ停止（Ctrl+C）")
         finally:
-            self.stop_synchronization_system()
-
-
-def main():
-    """メイン実行関数"""
-    print("🔄 TCP-LSL時刻同期システム")
-    
-    # システム初期化
-    synchronizer = TCPLSLSynchronizer(
-        tcp_host='127.0.0.1',
-        tcp_port=12345,
-        lsl_stream_name='MockEEG',
-        max_sync_events=1000,
-        sync_tolerance_ms=50  # 50ms以内の同期
-    )
-    
-    # データ収集セッションを実行（5分間）
-    synchronizer.run_data_collection_session(duration_seconds=300)
+            self.stop_collection()
 
 
 if __name__ == '__main__':
-    main()
+    print("🧠 LSL-TCP同期エピソード収集システム")
+    print("=" * 60)
+    print("選択してください:")
+    print("1. CSV保存モード（デフォルト）")
+    print("2. リアルタイム処理モード（DDPG学習等）")
+    print("3. ハイブリッドモード（CSV保存+リアルタイム処理）")
+    
+    choice = input("選択 (1-3): ").strip()
+    
+    if choice == "2":
+        # リアルタイム処理モードの例
+        def on_episode_created(episode: Episode):
+            """エピソード作成時のコールバック例（DDPG学習用）"""
+            print(f"🤖 DDPG学習用: エピソード{episode.episode_id}を受信")
+            print(f"   EEGデータ形状: {episode.lsl_data.shape}")
+            print(f"   ロボット状態: grip_force={episode.tcp_data.get('grip_force')}, "
+                  f"broken={episode.tcp_data.get('broken')}")
+            
+            # ここでDDPG学習システムにデータを送信
+            # ddpg_system.process_episode(episode.lsl_data, episode.tcp_data)
+        
+        collector = LSLTCPEpisodeCollector(
+            save_to_csv=False,  # CSV保存無効
+            enable_realtime_processing=True  # リアルタイム処理有効
+        )
+        collector.add_episode_callback(on_episode_created)
+        
+    elif choice == "3":
+        # ハイブリッドモードの例
+        def on_episode_created(episode: Episode):
+            """エピソード作成時のコールバック例"""
+            print(f"🔄 ハイブリッド処理: エピソード{episode.episode_id}")
+            # DDPG学習とCSV保存を同時実行
+        
+        collector = LSLTCPEpisodeCollector(
+            save_to_csv=True,   # CSV保存有効
+            enable_realtime_processing=True  # リアルタイム処理有効
+        )
+        collector.add_episode_callback(on_episode_created)
+        
+    else:
+        # デフォルト：CSV保存モード
+        collector = LSLTCPEpisodeCollector(
+            save_to_csv=True,   # CSV保存有効
+            enable_realtime_processing=False  # リアルタイム処理無効
+        )
+    
+    # システム実行
+    collector.run_demo()
