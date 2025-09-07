@@ -1,0 +1,36 @@
+{
+  "system": {
+    "lsl_stream_name": "MockEEG",
+    "tcp_host": "127.0.0.1",
+    "tcp_port": 12345,
+    "sampling_rate": 250,
+    "enable_gpu": true
+  },
+  "classifier": {
+    "model_path": "models/best_grip_force_classifier.pth",
+    "csv_data_dir": "DDPG_Python/logs",
+    "min_episodes_for_training": 10
+  },
+  "ddpg": {
+    "state_dim": 5,
+    "action_dim": 1,
+    "lr_actor": 0.0001,
+    "lr_critic": 0.001,
+    "gamma": 0.99,
+    "tau": 0.001,
+    "noise_std": 0.2,
+    "buffer_capacity": 100000,
+    "batch_size": 64
+  },
+  "training": {
+    "max_episodes": 1000,
+    "save_interval": 50,
+    "evaluation_interval": 100,
+    "early_stopping_patience": 200
+  },
+  "monitoring": {
+    "update_interval": 5.0,
+    "save_plots": true,
+    "stats_dir": "models/ddpg"
+  }
+}
