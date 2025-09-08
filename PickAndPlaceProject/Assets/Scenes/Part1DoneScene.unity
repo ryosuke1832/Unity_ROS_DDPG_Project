@@ -5043,7 +5043,11 @@ MonoBehaviour:
   episodeDuration: 30
   resetDelay: 2
   completionCheckInterval: 1.5
-  enableRandomGripForce: 1
+  enableTcpGripForceControl: 1
+  tcpCommandWaitTimeout: 10
+  waitForTcpCommandBeforeStart: 1
+  useTcpForceWhenAvailable: 1
+  enableRandomGripForce: 0
   minGripForce: 2
   maxGripForce: 30
   logGripForceChanges: 1
@@ -8241,12 +8245,26 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   serverHost: localhost
   serverPort: 12345
-  aluminumCan: {fileID: 0}
+  autoConnect: 1
+  autoReconnect: 1
+  reconnectInterval: 3
   sendInterval: 0.5
+  enableCompression: 0
+  maxRetries: 3
+  enableGripForceReceiving: 1
+  enableGripForceForwarding: 1
+  maxGripForceValue: 30
+  minGripForceValue: 0.1
+  episodeManager: {fileID: 829712812}
+  autoFindEpisodeManager: 1
   enableDebugLogs: 1
+  enableVerboseReceiveLog: 1
   showGripForceGUI: 1
   guiPosition: {x: 10, y: 10}
   guiSize: {x: 300, y: 150}
+  aluminumCan: {fileID: 622264442}
+  gripForceController: {fileID: 1124406058}
+  gripperInterface: {fileID: 1279036587}
 --- !u!4 &1493371640
 Transform:
   m_ObjectHideFlags: 0
@@ -9113,6 +9131,53 @@ Transform:
   m_CorrespondingSourceObject: {fileID: 8214453809557477258, guid: 5eecd5da92eb64eb6876d43ca0009083, type: 3}
   m_PrefabInstance: {fileID: 131350853}
   m_PrefabAsset: {fileID: 0}
+--- !u!1 &1756089446
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1756089448}
+  - component: {fileID: 1756089447}
+  m_Layer: 0
+  m_Name: TcpGripForceConnector
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1756089447
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1756089446}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5a794f824c343c94fb1ef91dc3338ec0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  episodeManager: {fileID: 829712812}
+  a2cClient: {fileID: 1493371639}
+  enableAutoConnection: 1
+  enableDebugLogs: 1
+--- !u!4 &1756089448
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1756089446}
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 3.1809835, y: -1.4089538, z: -2.5618255}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_RootOrder: 15
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!4 &1774214998 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 178561158468836152, guid: 4143f41bf12af4b399c9956cfd8dc36b, type: 3}

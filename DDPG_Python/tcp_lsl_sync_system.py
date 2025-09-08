@@ -98,7 +98,7 @@ class LSLTCPEpisodeCollector:
         # データバッファ
         self.lsl_data_buffer = deque(maxlen=self.max_buffer_samples)
         self.lsl_timestamp_buffer = deque(maxlen=self.max_buffer_samples)
-        self.tcp_data_buffer = deque(maxlen=1000)  # 最新1000件のTCPデータ
+        self.tcp_data_buffer = deque(maxlen=10000)  # 最新1000件のTCPデータ
         
         # エピソード管理
         self.episodes = []
@@ -146,8 +146,8 @@ class LSLTCPEpisodeCollector:
             print(f"❌ TCP接続失敗")
             return False
         
-        # TCPメッセージコールバック設定
-        self.tcp_interface.add_message_callback(self._on_tcp_message_received)
+        # # TCPメッセージコールバック設定
+        # self.tcp_interface.add_message_callback(self._on_tcp_message_received)
         
         # 実行フラグ設定
         self.is_running = True
@@ -181,7 +181,7 @@ class LSLTCPEpisodeCollector:
         print(f"🔄 バックグラウンドスレッド開始完了")
     
     def _tcp_monitor_thread(self):
-        """TCP受信データ監視スレッド"""
+        """TCP受信データ監視スレッド（修正版）"""
         print(f"📡 TCP監視スレッド開始")
         last_tcp_buffer_size = 0
         
@@ -194,8 +194,13 @@ class LSLTCPEpisodeCollector:
                     # 新しいデータが受信された
                     new_messages = list(self.tcp_interface.received_data)[last_tcp_buffer_size:]
                     
-                    for message_data in new_messages:
+                    print(f"📡 新着メッセージ: {len(new_messages)}件")
+                    
+                    for i, message_data in enumerate(new_messages):
+                        msg_index = last_tcp_buffer_size + i
+                        print(f"  [MSG {msg_index}] 処理開始: {str(message_data)[:50]}...")
                         self._process_tcp_message(message_data)
+                        print(f"  [MSG {msg_index}] 処理完了")
                     
                     last_tcp_buffer_size = current_tcp_buffer_size
                 
@@ -204,13 +209,16 @@ class LSLTCPEpisodeCollector:
             except Exception as e:
                 if self.is_running:
                     print(f"⚠️ TCP監視エラー: {e}")
+                    import traceback
+                    traceback.print_exc()
                 time.sleep(0.1)
         
         print(f"📡 TCP監視スレッド終了")
-    
+
+
     def _process_tcp_message(self, message_data):
-        """TCPメッセージの処理"""
-        print(f"🚨 TCP監視: message_data={message_data}")
+        """TCPメッセージの処理（強化版）"""
+        print(f"🔍 TCP処理開始: {type(message_data)} = {str(message_data)[:100]}")
         tcp_timestamp = time.time()
         
         # メッセージの内容をチェック
@@ -218,46 +226,63 @@ class LSLTCPEpisodeCollector:
         
         if isinstance(message_data, str):
             message_content = message_data.strip()
+            print(f"  → 文字列メッセージ: '{message_content}'")
         elif isinstance(message_data, dict):
-            # 辞書の中に'content'や'message'キーがある場合
-            if 'content' in message_data:
-                message_content = message_data['content'].strip()
-            elif 'message' in message_data:
-                message_content = message_data['message'].strip()
-            elif message_data.get('type') == 'text_message' and 'content' in message_data:
-                message_content = message_data['content'].strip()
-            # JSONデータ（ロボット状態）の場合
-            elif self._is_robot_state_data(message_data):
-                message_content = None  # ロボット状態データはEPISODE_ENDではない
+            # 辞書の中の様々なキーをチェック
+            for key in ['content', 'message', 'text']:
+                if key in message_data:
+                    message_content = str(message_data[key]).strip()
+                    print(f"  → 辞書[{key}]: '{message_content}'")
+                    break
+            
+            if message_content is None and self._is_robot_state_data(message_data):
+                print(f"  → ロボット状態データ")
+            elif message_content is None:
+                print(f"  → 不明な辞書データ: {list(message_data.keys())}")
         
-        print(f"🔍 抽出されたメッセージ内容: '{message_content}'")
-        
-        # EPISODE_ENDトリガーの処理
-        if message_content == "EPISODE_END":
-            print(f"🎯 EPISODE_ENDトリガー検出")
+        # EPISODE_ENDトリガーの厳密チェック
+        if message_content is not None and message_content == "EPISODE_END":
+            print(f"🎯 EPISODE_ENDトリガー検出!")
+            print(f"   受信時刻: {tcp_timestamp}")
             
             # 直前のJSONデータを検索
             previous_json_data = self._get_previous_json_data()
             if previous_json_data:
                 robot_episode_id = previous_json_data.get('episode', 'unknown')
                 print(f"📋 直前のJSONデータを採用: episode={robot_episode_id}")
+                print(f"   データ: {previous_json_data}")
                 
                 trigger_info = {
-                    'tcp_data': previous_json_data,  # 直前のJSONデータを使用
-                    'tcp_timestamp': tcp_timestamp,  # EPISODE_END受信時刻
+                    'tcp_data': previous_json_data,
+                    'tcp_timestamp': tcp_timestamp,
                     'trigger_timestamp': tcp_timestamp,
                     'trigger_type': 'EPISODE_END'
                 }
-                self.trigger_queue.put(trigger_info)
-                self.stats['total_triggers'] += 1
-                print(f"✅ トリガー情報をキューに追加しました")
+                
+                try:
+                    print(f"📥 トリガーキューに追加中...")
+                    self.trigger_queue.put(trigger_info, timeout=1.0)
+                    self.stats['total_triggers'] += 1
+                    print(f"✅ トリガー情報をキューに追加完了: エピソード{robot_episode_id}")
+                    print(f"   キューサイズ: {self.trigger_queue.qsize()}")
+                except Exception as e:
+                    print(f"❌ トリガーキュー追加エラー: {e}")
+                    import traceback
+                    traceback.print_exc()
             else:
                 print(f"⚠️ 直前のJSONデータが見つかりません")
-                # デバッグ用：バッファの内容を確認
-                print(f"🔍 TCPバッファサイズ: {len(self.tcp_data_buffer)}")
-                for i, entry in enumerate(list(self.tcp_data_buffer)[-5:]):
-                    print(f"  バッファ[{i}]: {entry['data']}")
-            return
+                print(f"   TCPバッファサイズ: {len(self.tcp_data_buffer)}")
+                
+                # デバッグ: 最新のデータをチェック
+                recent_entries = list(self.tcp_data_buffer)[-10:]
+                for i, entry in enumerate(recent_entries):
+                    data = entry['data']
+                    if isinstance(data, dict) and 'episode' in data:
+                        print(f"    バッファ[{i}]: episode={data.get('episode')}")
+                    else:
+                        print(f"    バッファ[{i}]: {str(data)[:50]}")
+            
+            return  # EPISODE_END処理完了
         
         # ロボット状態データの処理
         if isinstance(message_data, dict) and self._is_robot_state_data(message_data):
@@ -278,7 +303,8 @@ class LSLTCPEpisodeCollector:
             'timestamp': tcp_timestamp
         }
         self.tcp_data_buffer.append(tcp_entry)
-    
+
+
     def _lsl_data_thread(self):
         """LSLデータ受信スレッド"""
         print(f"📡 LSLデータ受信開始")
