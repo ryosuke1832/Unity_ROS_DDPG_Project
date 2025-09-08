@@ -234,7 +234,7 @@ class GripForceClassifierTrainer:
         avg_loss = test_loss / len(val_loader)
         accuracy = 100. * correct / total
         return avg_loss, accuracy, all_preds, all_targets
-    
+
     def train_full(self, train_loader, val_loader, epochs=100, early_stopping=None):
         """完全学習ループ
 
@@ -250,6 +250,7 @@ class GripForceClassifierTrainer:
 
         best_epoch = 0
         epochs_without_improvement = 0
+
         
         for epoch in range(epochs):
             print(f"\n--- Epoch {epoch+1}/{epochs} ---")
