@@ -235,10 +235,19 @@ class GripForceClassifierTrainer:
         accuracy = 100. * correct / total
         return avg_loss, accuracy, all_preds, all_targets
     
-    def train_full(self, train_loader, val_loader, epochs=100, early_stopping=15):
-        """完全学習ループ"""
-        print(f"🎓 学習開始: {epochs}エポック, Early Stopping={early_stopping}")
-        
+    def train_full(self, train_loader, val_loader, epochs=100, early_stopping=None):
+        """完全学習ループ
+
+        Args:
+            train_loader: 学習用データローダ
+            val_loader: 検証用データローダ
+            epochs: 学習エポック数
+            early_stopping: 連続エポック改善なしで停止する回数。
+                None の場合は早期終了を行わない
+        """
+        es_text = "なし" if early_stopping is None else early_stopping
+        print(f"🎓 学習開始: {epochs}エポック, Early Stopping={es_text}")
+
         best_epoch = 0
         epochs_without_improvement = 0
         
@@ -274,16 +283,16 @@ class GripForceClassifierTrainer:
                 self.best_val_accuracy = val_acc
                 best_epoch = epoch + 1
                 epochs_without_improvement = 0
-                
+
                 # モデル保存
                 os.makedirs('models', exist_ok=True)
                 torch.save(self.model.state_dict(), 'models/best_grip_force_classifier.pth')
                 print(f"🎯 ベストモデル更新! 精度: {val_acc:.1f}%")
             else:
                 epochs_without_improvement += 1
-                
+
             # Early Stopping
-            if epochs_without_improvement >= early_stopping:
+            if early_stopping is not None and epochs_without_improvement >= early_stopping:
                 print(f"⏰ Early Stopping: {early_stopping}エポック改善なし")
                 break
         
@@ -480,12 +489,11 @@ def train_grip_force_classifier(csv_dir: str, model_save_path: str = 'models/gri
     
     # 学習実行（エポック数を動的調整）
     epochs = min(100, max(20, total_size * 2))
-    early_stopping = min(15, max(5, epochs // 5))
-    
-    print(f"🚀 学習開始... (epochs={epochs}, early_stopping={early_stopping})")
+
+    print(f"🚀 学習開始... (epochs={epochs}, early_stopping=None)")
     best_val_accuracy = trainer.train_full(
-        train_loader, val_loader, 
-        epochs=epochs, early_stopping=early_stopping
+        train_loader, val_loader,
+        epochs=epochs,
     )
     
     # 最終評価
