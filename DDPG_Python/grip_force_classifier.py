@@ -235,7 +235,7 @@ class GripForceClassifierTrainer:
         accuracy = 100. * correct / total
         return avg_loss, accuracy, all_preds, all_targets
     
-    def train_full(self, train_loader, val_loader, epochs=100, early_stopping=15):
+    def train_full(self, train_loader, val_loader, epochs=100, early_stopping=None):
         """完全学習ループ"""
         print(f"🎓 学習開始: {epochs}エポック, Early Stopping={early_stopping}")
         
