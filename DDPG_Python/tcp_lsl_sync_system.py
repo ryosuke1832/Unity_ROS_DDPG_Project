@@ -93,7 +93,10 @@ class LSLTCPEpisodeCollector:
         )
         
         # TCP通信システム
-        self.tcp_interface = EEGTCPInterface(host=tcp_host, port=tcp_port)
+        # 受信バッファがあふれて未処理データが失われないようバッファサイズを拡大
+        self.tcp_interface = EEGTCPInterface(host=tcp_host,
+                                            port=tcp_port,
+                                            max_buffer_size=10000)
         
         # データバッファ
         self.lsl_data_buffer = deque(maxlen=self.max_buffer_samples)
@@ -183,36 +186,25 @@ class LSLTCPEpisodeCollector:
     def _tcp_monitor_thread(self):
         """TCP受信データ監視スレッド（修正版）"""
         print(f"📡 TCP監視スレッド開始")
-        last_tcp_buffer_size = 0
-        
+
         while self.is_running:
             try:
-                # unity_tcp_interfaceの受信データを監視
-                current_tcp_buffer_size = len(self.tcp_interface.received_data)
-                
-                if current_tcp_buffer_size > last_tcp_buffer_size:
-                    # 新しいデータが受信された
-                    new_messages = list(self.tcp_interface.received_data)[last_tcp_buffer_size:]
-                    
-                    print(f"📡 新着メッセージ: {len(new_messages)}件")
-                    
-                    for i, message_data in enumerate(new_messages):
-                        msg_index = last_tcp_buffer_size + i
-                        print(f"  [MSG {msg_index}] 処理開始: {str(message_data)[:50]}...")
-                        self._process_tcp_message(message_data)
-                        print(f"  [MSG {msg_index}] 処理完了")
-                    
-                    last_tcp_buffer_size = current_tcp_buffer_size
-                
-                time.sleep(0.1)  # 100ms間隔で監視
-                
+                # 新着メッセージをキューから取り出して処理
+                message_data = self.tcp_interface.received_data.popleft()
+                print(f"📡 新着メッセージ処理: {str(message_data)[:50]}...")
+                self._process_tcp_message(message_data)
+
+            except IndexError:
+                # 受信キューが空の場合は少し待機
+                time.sleep(0.1)
+
             except Exception as e:
                 if self.is_running:
                     print(f"⚠️ TCP監視エラー: {e}")
                     import traceback
                     traceback.print_exc()
                 time.sleep(0.1)
-        
+
         print(f"📡 TCP監視スレッド終了")
 
 
