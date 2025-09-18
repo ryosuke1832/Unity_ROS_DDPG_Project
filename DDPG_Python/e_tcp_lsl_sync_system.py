@@ -29,9 +29,9 @@ from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass
 
 # 同一ディレクトリのモジュールをインポート
-from eeg_receiver import LSLEEGReceiver, EEGDataProcessor
-from eeg_neuroadaptation_preprocessor import NeuroadaptationEEGPreprocessor
-from unity_tcp_interface import EEGTCPInterface
+from b_eeg_receiver import LSLEEGReceiver, EEGDataProcessor
+from d_eeg_neuroadaptation_preprocessor import NeuroadaptationEEGPreprocessor
+from c_unity_tcp_interface import EEGTCPInterface
 
 @dataclass
 class Episode:
@@ -49,7 +49,8 @@ class LSLTCPEpisodeCollector:
     """LSL-TCP同期エピソード収集システム"""
     
     def __init__(self, 
-                 lsl_stream_name='X.on-102807-0109',
+                #  lsl_stream_name='X.on-102807-0109',
+                 lsl_stream_name='MockEEG',#mock
                  tcp_host='127.0.0.1',
                  tcp_port=12345,
                  sampling_rate=250,

@@ -27,8 +27,8 @@ from typing import Dict, List, Optional, Tuple, Any
 import pickle
 
 # 既存システムのインポート
-from tcp_lsl_sync_system import LSLTCPEpisodeCollector, Episode
-from unity_tcp_interface import EEGTCPInterface
+from DDPG_Python.tcp_lsl_sync_system import LSLTCPEpisodeCollector, Episode
+from DDPG_Python.unity_tcp_interface import EEGTCPInterface
 from grip_force_classifier import RealtimeGripForceClassifier
 
 # PyTorch設定

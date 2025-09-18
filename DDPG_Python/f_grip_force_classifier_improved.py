@@ -30,6 +30,7 @@ from datetime import datetime
 from collections import Counter
 import json
 import warnings
+from pathlib import Path
 warnings.filterwarnings('ignore')
 
 # デバイス設定
@@ -606,8 +607,9 @@ def evaluate_model(model, X_test, y_test, class_names):
         plt.xlabel('予測クラス')
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        cm_path = f'models/confusion_matrix_improved_{timestamp}.png'
-        os.makedirs('models', exist_ok=True)
+        BASE_DIR = Path(__file__).resolve().parent
+        cm_path = BASE_DIR / "models" / f"confusion_matrix_improved_{timestamp}.png"
+        os.makedirs(cm_path.parent, exist_ok=True)
         plt.savefig(cm_path, dpi=300, bbox_inches='tight')
         plt.close()
         print(f"混同行列保存: {cm_path}")
@@ -639,9 +641,9 @@ def main():
         
         if not csv_dir:
             # デフォルトパス検索
-            log_dirs = glob.glob("logs/episodes_*")
+            log_dirs = glob.glob("logs/episodes_20250908_*")
             if not log_dirs:
-                log_dirs = glob.glob("DDPG_Python/logs/episodes_*")
+                log_dirs = glob.glob("DDPG_Python/logs/episodes_20250908_*")
             
             if log_dirs:
                 csv_dir = max(log_dirs)  # 最新のログディレクトリ
@@ -705,9 +707,10 @@ def main():
     # 結果保存
     os.makedirs('models', exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    BASE_DIR = Path(__file__).resolve().parent  
     
     # モデル保存
-    model_path = f'models/improved_grip_force_classifier_{timestamp}.pth'
+    model_path = BASE_DIR / "models" / f"improved_grip_force_classifier_{timestamp}.pth"
     torch.save({
         'model_state_dict': best_model.state_dict(),
         'scaler': scaler,
@@ -733,8 +736,8 @@ def main():
         'confusion_matrix': test_results['confusion_matrix'],
         'class_names': class_names.tolist()
     }
-    
-    result_path = f'models/improved_results_{timestamp}.json'
+
+    result_path = BASE_DIR / "models" / f"improved_results_{timestamp}.json"
     with open(result_path, 'w', encoding='utf-8') as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
     
