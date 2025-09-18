@@ -49,7 +49,7 @@ class LSLTCPEpisodeCollector:
     """LSL-TCP同期エピソード収集システム"""
     
     def __init__(self, 
-                 lsl_stream_name='MockEEG',
+                 lsl_stream_name='X.on-102807-0109',
                  tcp_host='127.0.0.1',
                  tcp_port=12345,
                  sampling_rate=250,

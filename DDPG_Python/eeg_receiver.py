@@ -235,7 +235,7 @@ class EEGDataProcessor:
 
 
 class LSLEEGReceiver:
-    def __init__(self, stream_name="MockEEG"):
+    def __init__(self, stream_name=" X.on-102807-0109"):
         """
         LSL EEG受信システムの初期化
         

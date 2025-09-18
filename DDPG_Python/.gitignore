@@ -16,6 +16,7 @@ logs/
 training_data/
 plot/
 models/
+0.old/
 
 .idea/
 .archive/

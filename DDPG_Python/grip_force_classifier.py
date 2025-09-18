@@ -533,7 +533,7 @@ def train_grip_force_classifier(csv_dir: str, model_save_path: str = 'models/gri
 class RealtimeGripForceClassifier:
     """リアルタイム把持力分類システム"""
     
-    def __init__(self, model_path: str, lsl_stream_name: str = 'MockEEG', 
+    def __init__(self, model_path: str, lsl_stream_name: str = 'X.on-102807-0109', 
                  tcp_host: str = '127.0.0.1', tcp_port: int = 12345):
         """
         Args:
