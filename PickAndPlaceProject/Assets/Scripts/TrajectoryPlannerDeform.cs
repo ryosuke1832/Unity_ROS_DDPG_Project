@@ -18,7 +18,7 @@ public class TrajectoryPlannerDeform : MonoBehaviour
     public bool resetOnStart = true;
     
     [Header("把持設定")]
-    public float graspEvaluationDelay = 3f;
+    public float graspEvaluationDelay = 1f;
     public bool enableDeformationLogging = true;
     
     // 元のTrajectoryPlannerへの参照
@@ -78,7 +78,7 @@ public class TrajectoryPlannerDeform : MonoBehaviour
 
     private IEnumerator ExecuteAfterReset()
     {
-        yield return new WaitForSeconds(0.5f);
+        yield return new WaitForSeconds(0.2f);
         PublishJointAlminumCan();
     }
 
@@ -373,7 +373,7 @@ public class TrajectoryPlannerDeform : MonoBehaviour
         
         while (true)
         {
-            yield return new WaitForSeconds(0.1f);
+            yield return new WaitForSeconds(0.05f);
             
             float currentLeftTarget = leftGripper.xDrive.target;
             float currentRightTarget = rightGripper.xDrive.target;

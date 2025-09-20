@@ -22,11 +22,11 @@ public class AluminumCanA2CClient : MonoBehaviour
     public bool autoConnect = true;
     public bool autoReconnect = true;
     [Range(1f, 10f)]
-    public float reconnectInterval = 3f;
+    public float reconnectInterval = 1.5f;
     
     [Header("📡 通信設定")]
     [Range(0.1f, 5f)]
-    public float sendInterval = 1f;
+    public float sendInterval = 0.5f;
     public bool enableCompression = false;
     public int maxRetries = 3;
     

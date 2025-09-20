@@ -31,7 +31,7 @@ public class RobotPoseConfiguration : MonoBehaviour
     
     [Header("設定")]
     public bool useCustomAngles = false;
-    public float transitionSpeed = 2f;
+    public float transitionSpeed = 4f;
     public bool enableLogging = true;
     
     // 内部変数

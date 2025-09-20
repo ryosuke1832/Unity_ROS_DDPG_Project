@@ -32,7 +32,7 @@ public class IntegratedAluminumCan : MonoBehaviour
     
     [Range(0.1f, 2f)]
     [Tooltip("コライダーサイズ変更の遅延時間")]
-    public float colliderChangeDelay = 0.3f;
+    public float colliderChangeDelay = 0.1f;
     
     [Header("摩擦制御設定")]
     [Tooltip("通常時の摩擦材質")]
@@ -45,7 +45,7 @@ public class IntegratedAluminumCan : MonoBehaviour
     public bool enableSlipperyWhenWeak = true;
     
     public bool enableColliderSystem = true;
-    public bool showColliderDebug = true;
+    public bool showColliderDebug = false;
     
     public float deformationThreshold 
     { 
@@ -77,8 +77,8 @@ public class IntegratedAluminumCan : MonoBehaviour
     public float canMass = 0.015f; // 15g
     
     [Header("デバッグ設定")]
-    public bool showDebugInfo = true;
-    public bool showForceGizmos = true;
+    public bool showDebugInfo = false;
+    public bool showForceGizmos = false;
     
     // 既存の内部状態
     private bool isCrushed = false;

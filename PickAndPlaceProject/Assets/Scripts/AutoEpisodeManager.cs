@@ -19,18 +19,18 @@ public class AutoEpisodeManager : MonoBehaviour
     
     [Header("エピソード設定")]
     [Range(1f, 10f)]
-    public float episodeDuration = 2f; // エピソードの最大時間（秒）
+    public float episodeDuration = 1.5f; // エピソードの最大時間（秒）
     
     [Range(0.5f, 5f)]
-    public float resetDelay = 2f; // リセット後の待機時間
+    public float resetDelay = 0.1f; // リセット後の待機時間
     
     [Range(0.1f, 2f)]
-    public float completionCheckInterval = 0.5f; // 完了チェックの間隔
+    public float completionCheckInterval = 0.05f; // 完了チェックの間隔
     
     [Header("🔥 TCP把持力制御")]
     [SerializeField] private bool enableTcpGripForceControl = false;
     [Range(1f, 30f)]
-    public float tcpCommandWaitTimeout = 2f; // TCP指令待機のタイムアウト
+    public float tcpCommandWaitTimeout = 1f; // TCP指令待機のタイムアウト
     public bool waitForTcpCommandBeforeStart = true; // エピソード開始前にTCP指令を待機
     public bool useTcpForceWhenAvailable = true; // TCP指令が利用可能な場合に優先使用
     
@@ -52,7 +52,7 @@ public class AutoEpisodeManager : MonoBehaviour
     public float movementThreshold = 0.01f; // 停止判定の閾値
     
     [Range(1f, 10f)]
-    public float stoppedTimeThreshold = 3f; // 停止と判定する時間
+    public float stoppedTimeThreshold = 1.5f; // 停止と判定する時間
     
     [Header("デバッグ")]
     public bool enableDebugLogs = true;
@@ -558,7 +558,7 @@ public class AutoEpisodeManager : MonoBehaviour
         }
         
         // 少し待機してからロボット動作開始
-        yield return new WaitForSeconds(0.5f);
+        yield return new WaitForSeconds(0.2f);
         
         // ロボット動作開始
         if (trajectoryPlanner != null)
@@ -568,7 +568,7 @@ public class AutoEpisodeManager : MonoBehaviour
         
         OnEpisodeStarted?.Invoke(currentEpisodeNumber);
         
-        yield return new WaitForSeconds(0.5f);
+        yield return new WaitForSeconds(0.1f);
     }
     
     IEnumerator RunEpisode()
@@ -635,12 +635,11 @@ public class AutoEpisodeManager : MonoBehaviour
         
         yield return new WaitForSeconds(0.5f);
     }
-    
-    IEnumerator ResetForNextEpisode()
+        IEnumerator ResetForNextEpisode()
     {
         currentState = EpisodeState.Resetting;
 
-        // 🔥 リセットの直前にエピソード結果を送信
+        // エピソード結果送信
         if (a2cClient != null && pendingEpisodeResult.HasValue)
         {
             a2cClient.SendEpisodeResult(pendingEpisodeResult.Value);
@@ -648,31 +647,18 @@ public class AutoEpisodeManager : MonoBehaviour
             pendingEpisodeResult = null;
         }
 
-        if (enableDebugLogs)
-        {
-            Debug.Log("🔄 次のエピソードに向けてリセット中...");
-        }
-        
+        // 一度だけリセット実行
         if (trajectoryPlanner != null)
         {
             trajectoryPlanner.ResetToInitialPositions();
         }
         
-        if (aluminumCan != null)
-        {
-            aluminumCan.ResetCan();
-        }
-        
-        yield return new WaitForSeconds(resetDelay);
+        // 待機時間を大幅削減: 2秒 → 0.1秒
+        yield return new WaitForSeconds(0.1f);
         
         if (niryoOneRobot != null)
         {
             lastRobotPosition = niryoOneRobot.transform.position;
-        }
-        
-        if (enableDebugLogs)
-        {
-            Debug.Log("✅ リセット完了");
         }
     }
     
