@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-EEG系システム用統合TCP通信モジュール
-lsl_classification.pyとeeg_ddpg_rl_system.pyで使用するTCP通信を統一
+EEG系システム用統合TCP通信モジュール（REQUEST_GRIP_FORCE正規化パッチ適用済み）
 
-機能:
-- Unity との双方向TCP通信
-- JSON メッセージ送受信
-- コールバック機能（メッセージ受信時の処理）
-- EEG分類器・強化学習システム向けの特化機能
-- a2cClient.SendGripForceRequest()への自動応答
+修正点：
+1. auto_replyフラグを追加（デフォルトFalse）
+2. 自動応答処理で早期return
+3. テキスト判定を厳格化（完全一致）
+4. 直近のロボット状態を保持
+5. REQUEST_GRIP_FORCEを正規化してコールバックに渡す
+
+これにより学習側のコールバックのみが把持力を決定するようになります。
 """
 
 from collections import deque
@@ -21,14 +22,14 @@ import random
 
 class EEGTCPInterface:
     """
-    EEG系システム用統合TCP通信インターフェース
-    Unity の a2cClient.SendGripForceRequest() に自動応答
+    EEG系システム用統合TCP通信インターフェース（自動応答制御付き）
     """
     
-    def __init__(self, host='127.0.0.1', port=12345, max_buffer_size=1000):
+    def __init__(self, host='127.0.0.1', port=12345, max_buffer_size=1000, auto_reply=False):
         self.host = host
         self.port = port
         self.max_buffer_size = max_buffer_size
+        self.auto_reply = auto_reply  # ★ 自動応答フラグ追加
         
         # サーバー管理
         self.server_socket = None
@@ -40,6 +41,9 @@ class EEGTCPInterface:
         # データバッファ
         self.received_data = deque(maxlen=max_buffer_size)
         self.sent_data = deque(maxlen=max_buffer_size)  # 送信履歴
+        
+        # ★ 直近のロボット状態を保持
+        self.last_robot_state = None
         
         # コールバック関数（受信時の処理）
         self.message_callbacks = []
@@ -58,6 +62,8 @@ class EEGTCPInterface:
             'connection_count': 0,
             'grip_force_requests': 0,
             'grip_force_responses': 0,
+            'auto_responses': 0,  # ★ 自動応答数を追加
+            'text_normalizations': 0,  # ★ テキスト正規化数を追加
             'last_activity': None,
             'start_time': None
         }
@@ -67,6 +73,12 @@ class EEGTCPInterface:
         
         print(f"🔌 EEG TCP インターフェース初期化: {host}:{port}")
         print(f"   把持力範囲: {self.min_grip_force:.1f} - {self.max_grip_force:.1f} N")
+        print(f"   自動応答: {'有効' if auto_reply else '無効'}")
+    
+    def _is_robot_state_data(self, data: Dict[str, Any]) -> bool:
+        """ロボット状態データかを判定"""
+        required_keys = ['episode', 'position', 'velocity', 'grip_force']
+        return isinstance(data, dict) and all(key in data for key in required_keys)
     
     def set_grip_force_range(self, min_force: float, max_force: float):
         """把持力の範囲を設定"""
@@ -191,10 +203,16 @@ class EEGTCPInterface:
                 # 受信データをバッファに追加
                 self.received_data.append(message_data)
                 
-                # 把持力リクエストの処理
-                self._handle_grip_force_request(message_data)
+                # ★ ロボット状態データの場合は保持
+                if self._is_robot_state_data(message_data):
+                    self.last_robot_state = message_data
                 
-                # コールバック実行
+                # ★ 修正: 自動応答フラグチェック
+                if self.auto_reply:
+                    # 把持力リクエストの処理
+                    self._handle_grip_force_request(message_data)
+                
+                # コールバック実行（常に実行）
                 for callback in self.message_callbacks:
                     try:
                         callback(message_data)
@@ -205,9 +223,41 @@ class EEGTCPInterface:
                 # JSON以外のメッセージ（テキストコマンド等）
                 print(f"📝 テキストメッセージ: {message_str}")
                 
-                # Unity側の特定メッセージへの対応
-                if self._handle_unity_text_commands(message_str):
-                    return
+                message_upper = message_str.strip().upper()
+                
+                # ★ REQUEST_GRIP_FORCE を正規化して学習側に渡す（自動返信はしない）
+                if message_upper == "REQUEST_GRIP_FORCE":
+                    self.stats['text_normalizations'] += 1
+                    
+                    normalized = {
+                        'type': 'request_grip_force',
+                        'timestamp': time.time(),
+                        'source': 'text',
+                    }
+                    
+                    if self.last_robot_state and isinstance(self.last_robot_state, dict):
+                        normalized['episode'] = self.last_robot_state.get('episode')
+                        # 必要に応じて文脈も渡す
+                        normalized['context'] = self.last_robot_state
+                    
+                    print(f"🧩 正規化: REQUEST_GRIP_FORCE → request_grip_force (episode={normalized.get('episode')})")
+                    
+                    # キューにも入れておくと監視側でも拾える
+                    self.received_data.append(normalized)
+                    
+                    # コールバック発火（自動応答はしない）
+                    for callback in self.message_callbacks:
+                        try:
+                            callback(normalized)
+                        except Exception as e:
+                            print(f"⚠️ メッセージコールバックエラー: {e}")
+                    
+                    return  # ここで終了（下の汎用処理に落とさない）
+                
+                # ★ 修正: 自動応答フラグチェック
+                auto_handled = False
+                if self.auto_reply:
+                    auto_handled = self._handle_unity_text_commands(message_str)
                 
                 # テキストメッセージもバッファに追加
                 text_data = {
@@ -217,11 +267,23 @@ class EEGTCPInterface:
                 }
                 self.received_data.append(text_data)
                 
+                # ★ コールバック実行（自動処理されなかった場合、または自動応答無効時）
+                if not auto_handled or not self.auto_reply:
+                    for callback in self.message_callbacks:
+                        try:
+                            callback(text_data)
+                        except Exception as e:
+                            print(f"⚠️ メッセージコールバックエラー: {e}")
+                
         except Exception as e:
             print(f"❌ メッセージ処理エラー: {e}")
     
     def _handle_grip_force_request(self, message_data: Dict[str, Any]):
-        """把持力リクエストの処理"""
+        """把持力リクエストの処理（自動応答制御付き）"""
+        # ★ 修正: 自動応答が無効な場合は早期return
+        if not self.auto_reply:
+            return
+        
         message_type = message_data.get('type', '').lower()
         
         # 把持力リクエストの検出（複数のパターンに対応）
@@ -229,7 +291,8 @@ class EEGTCPInterface:
             'grip' in message_type or 'force' in message_type):
             
             self.stats['grip_force_requests'] += 1
-            print(f"🎯 把持力リクエスト検出: {message_data}")
+            self.stats['auto_responses'] += 1
+            print(f"🎯 自動把持力リクエスト検出: {message_data}")
             
             # 把持力を生成（ランダムまたはロジックベース）
             grip_force = self._generate_grip_force(message_data)
@@ -239,17 +302,22 @@ class EEGTCPInterface:
             
             if success:
                 self.stats['grip_force_responses'] += 1
-                print(f"✅ 把持力応答送信成功: {grip_force:.2f}N")
+                print(f"✅ 自動把持力応答送信成功: {grip_force:.2f}N")
             else:
-                print(f"❌ 把持力応答送信失敗")
+                print(f"❌ 自動把持力応答送信失敗")
     
     def _handle_unity_text_commands(self, message_str: str) -> bool:
-        """Unity側のテキストコマンドへの対応"""
-        message_lower = message_str.lower()
+        """Unity側のテキストコマンドへの対応（自動応答制御付き）"""
+        # ★ 修正: 自動応答が無効な場合は早期return
+        if not self.auto_reply:
+            return False
         
-        # 把持力リクエスト関連のテキストコマンド
-        if any(keyword in message_lower for keyword in ['grip', 'force', 'request', 'command']):
-            print(f"🎯 テキスト把持力リクエスト検出: {message_str}")
+        # ★ 修正: テキスト判定を厳格化（完全一致）
+        message_upper = message_str.strip().upper()
+        
+        # 把持力リクエスト関連のテキストコマンド（完全一致）
+        if message_upper == "REQUEST_GRIP_FORCE":
+            print(f"🎯 自動テキスト把持力リクエスト検出: {message_str}")
             
             # デフォルト把持力で応答
             grip_force = self._generate_grip_force({})
@@ -257,12 +325,13 @@ class EEGTCPInterface:
             
             if success:
                 self.stats['grip_force_responses'] += 1
-                print(f"✅ テキスト把持力応答送信: {grip_force:.2f}N")
+                self.stats['auto_responses'] += 1
+                print(f"✅ 自動テキスト把持力応答送信: {grip_force:.2f}N")
             
             return True
         
-        # 接続確認メッセージ
-        if any(keyword in message_lower for keyword in ['ping', 'connect', 'hello', 'test']):
+        # 接続確認メッセージ（完全一致）
+        if message_upper in ['PING', 'CONNECT', 'HELLO', 'TEST']:
             print(f"🔔 接続確認メッセージ: {message_str}")
             
             response = {
@@ -306,7 +375,7 @@ class EEGTCPInterface:
             'type': 'grip_force_command',
             'target_force': round(grip_force, 2),
             'timestamp': time.time(),
-            'session_id': f"eeg_tcp_{int(time.time())}"
+            'session_id': f"eeg_tcp_auto_{int(time.time())}"
         }
         
         # 元メッセージの情報を引き継ぎ
@@ -399,6 +468,8 @@ class EEGTCPInterface:
         print(f"   送信メッセージ数    : {self.stats['messages_sent']}")
         print(f"   把持力リクエスト数  : {self.stats['grip_force_requests']}")
         print(f"   把持力応答数        : {self.stats['grip_force_responses']}")
+        print(f"   自動応答数          : {self.stats['auto_responses']}")
+        print(f"   テキスト正規化数    : {self.stats['text_normalizations']}")
         
         if self.stats['start_time']:
             uptime = time.time() - self.stats['start_time']
@@ -414,7 +485,8 @@ class EEGTCPInterface:
         
         try:
             print(f"💡 Unity側で a2cClient.SendGripForceRequest() を実行してください")
-            print(f"   自動で把持力応答が送信されます")
+            print(f"   自動応答: {'有効' if self.auto_reply else '無効'}")
+            print(f"   テキスト REQUEST_GRIP_FORCE は正規化されてコールバックに渡されます")
             print(f"   Ctrl+C で終了")
             
             # メインループ
@@ -449,8 +521,15 @@ def on_client_disconnected():
 
 
 if __name__ == '__main__':
-    # EEG TCP インターフェース作成
-    interface = EEGTCPInterface(host='127.0.0.1', port=12345)
+    # EEG TCP インターフェース作成（自動応答テスト）
+    print("自動応答モードを選択してください:")
+    print("1. 自動応答有効（旧動作）")
+    print("2. 自動応答無効（学習用・推奨）")
+    
+    choice = input("選択 (1-2): ").strip()
+    auto_reply = (choice == "1")
+    
+    interface = EEGTCPInterface(host='127.0.0.1', port=12345, auto_reply=auto_reply)
     
     # カスタムコールバック設定（オプション）
     interface.add_message_callback(on_message_received)

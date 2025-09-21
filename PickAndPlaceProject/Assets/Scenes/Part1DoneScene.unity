@@ -1821,7 +1821,7 @@ MonoBehaviour:
     m_HorizontalOverflow: 0
     m_VerticalOverflow: 0
     m_LineSpacing: 1
-  m_Text: UnderGrip
+  m_Text: 3. UnderGrip
 --- !u!222 &422632192
 CanvasRenderer:
   m_ObjectHideFlags: 0
@@ -5134,7 +5134,7 @@ MonoBehaviour:
   logGripForceChanges: 1
   enableAutoEpisodes: 1
   startOnAwake: 1
-  maxEpisodesPerSession: 1000
+  maxEpisodesPerSession: 5000
   movementThreshold: 0.01
   stoppedTimeThreshold: 3
   enableDebugLogs: 0
@@ -7646,7 +7646,7 @@ MonoBehaviour:
     m_HorizontalOverflow: 0
     m_VerticalOverflow: 0
     m_LineSpacing: 1
-  m_Text: OverGrip
+  m_Text: '1. OverGrip '
 --- !u!222 &1266337016
 CanvasRenderer:
   m_ObjectHideFlags: 0
@@ -10188,7 +10188,7 @@ MonoBehaviour:
     m_HorizontalOverflow: 0
     m_VerticalOverflow: 0
     m_LineSpacing: 1
-  m_Text: Correct
+  m_Text: 2. Correct
 --- !u!222 &1968681481
 CanvasRenderer:
   m_ObjectHideFlags: 0

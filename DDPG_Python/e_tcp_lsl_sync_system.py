@@ -1,19 +1,10 @@
 #!/usr/bin/env python3
 """
-LSL-TCP同期エピソード収集システム
+LSL-TCP同期エピソード収集システム（自動応答無効化済み）
 
-機能:
-1. LSL（EEG）データをeeg_receiver.pyで受信・eeg_neuroadaptation_preprocessor.pyで前処理
-2. TCP（Unity）データをunity_tcp_interface.pyで受信
-3. EPISODE_ENDトリガー受信時に、直前のJSONデータを採用
-4. トリガー時刻から3.2秒さかのぼって1.2秒分のLSLデータを抽出
-5. episode_idはJSONの'episode'フィールドの値を使用
-6. CSVファイルでの保存機能
-
-依存関係:
-- eeg_receiver.py (同一ディレクトリ)
-- eeg_neuroadaptation_preprocessor.py (同一ディレクトリ)  
-- unity_tcp_interface.py (同一ディレクトリ)
+修正点：
+- EEGTCPInterfaceのauto_reply=Falseを明示的に設定
+- 自動応答による学習への干渉を防止
 """
 
 import numpy as np
@@ -31,7 +22,37 @@ from dataclasses import dataclass
 # 同一ディレクトリのモジュールをインポート
 from b_eeg_receiver import LSLEEGReceiver, EEGDataProcessor
 from d_eeg_neuroadaptation_preprocessor import NeuroadaptationEEGPreprocessor
-from c_unity_tcp_interface import EEGTCPInterface
+
+# 元のEEGTCPInterfaceをインポートして拡張
+from c_unity_tcp_interface import EEGTCPInterface as OriginalEEGTCPInterface
+
+class EEGTCPInterface(OriginalEEGTCPInterface):
+    """EEGTCPInterface拡張版（自動応答制御付き）"""
+    def __init__(self, host='127.0.0.1', port=12345, max_buffer_size=1000, auto_reply=False):
+        # 元の初期化を実行
+        super().__init__(host=host, port=port, max_buffer_size=max_buffer_size)
+        self.auto_reply = auto_reply
+        
+        if hasattr(self, 'stats') and 'auto_responses' not in self.stats:
+            self.stats['auto_responses'] = 0
+        
+        print(f"🔌 EEGTCPInterface拡張版: 自動応答={'有効' if auto_reply else '無効'}")
+    
+    # 元のメソッドをオーバーライドして自動応答を制御
+    def _handle_grip_force_request(self, message_data):
+        if not self.auto_reply:
+            return
+        # 元の処理を呼び出し
+        if hasattr(super(), '_handle_grip_force_request'):
+            super()._handle_grip_force_request(message_data)
+    
+    def _handle_unity_text_commands(self, message_str):
+        if not self.auto_reply:
+            return False
+        # 元の処理を呼び出し
+        if hasattr(super(), '_handle_unity_text_commands'):
+            return super()._handle_unity_text_commands(message_str)
+        return False
 
 @dataclass
 class Episode:
@@ -46,11 +67,10 @@ class Episode:
     preprocessing_info: Dict[str, Any]  # 前処理情報
     
 class LSLTCPEpisodeCollector:
-    """LSL-TCP同期エピソード収集システム"""
+    """LSL-TCP同期エピソード収集システム（自動応答無効化済み）"""
     
     def __init__(self, 
-                #  lsl_stream_name='X.on-102807-0109',
-                 lsl_stream_name='MockEEG',#mock
+                 lsl_stream_name='MockEEG',
                  tcp_host='127.0.0.1',
                  tcp_port=12345,
                  sampling_rate=250,
@@ -93,11 +113,13 @@ class LSLTCPEpisodeCollector:
             enable_ica=False  # リアルタイム用に高速化
         )
         
-        # TCP通信システム
-        # 受信バッファがあふれて未処理データが失われないようバッファサイズを拡大
-        self.tcp_interface = EEGTCPInterface(host=tcp_host,
-                                            port=tcp_port,
-                                            max_buffer_size=10000)
+        # TCP通信システム（★ 修正: auto_reply=False で自動応答を無効化）
+        self.tcp_interface = EEGTCPInterface(
+            host=tcp_host,
+            port=tcp_port,
+            max_buffer_size=10000,
+            auto_reply=False  # ★ 自動応答を無効化
+        )
         
         # データバッファ
         self.lsl_data_buffer = deque(maxlen=self.max_buffer_samples)
@@ -127,11 +149,12 @@ class LSLTCPEpisodeCollector:
             'start_time': None
         }
         
-        print(f"🧠 LSL-TCP同期エピソード収集システム初期化完了")
+        print(f"🧠 LSL-TCP同期エピソード収集システム初期化完了（自動応答無効化済み）")
         print(f"   セッションID: {self.session_id}")
         print(f"   ルックバック: {lookback_seconds}秒 ({self.lookback_samples}サンプル)")
         print(f"   エピソード長: {episode_duration}秒 ({self.episode_samples}サンプル)")
         print(f"   出力ディレクトリ: {self.output_dir}")
+        print(f"   TCP自動応答: 無効")
     
     def start_collection(self):
         """データ収集開始"""
@@ -149,9 +172,6 @@ class LSLTCPEpisodeCollector:
         if not self.tcp_interface.start_server():
             print(f"❌ TCP接続失敗")
             return False
-        
-        # # TCPメッセージコールバック設定
-        # self.tcp_interface.add_message_callback(self._on_tcp_message_received)
         
         # 実行フラグ設定
         self.is_running = True
@@ -185,8 +205,8 @@ class LSLTCPEpisodeCollector:
         print(f"🔄 バックグラウンドスレッド開始完了")
     
     def _tcp_monitor_thread(self):
-        """TCP受信データ監視スレッド（修正版）"""
-        print(f"📡 TCP監視スレッド開始")
+        """TCP受信データ監視スレッド"""
+        print(f"📡 TCP監視スレッド開始（自動応答無効化済み）")
 
         while self.is_running:
             try:
@@ -208,9 +228,8 @@ class LSLTCPEpisodeCollector:
 
         print(f"📡 TCP監視スレッド終了")
 
-
     def _process_tcp_message(self, message_data):
-        """TCPメッセージの処理（強化版）"""
+        """TCPメッセージの処理"""
         print(f"🔍 TCP処理開始: {type(message_data)} = {str(message_data)[:100]}")
         tcp_timestamp = time.time()
         
@@ -297,7 +316,6 @@ class LSLTCPEpisodeCollector:
         }
         self.tcp_data_buffer.append(tcp_entry)
 
-
     def _lsl_data_thread(self):
         """LSLデータ受信スレッド"""
         print(f"📡 LSLデータ受信開始")
@@ -325,49 +343,6 @@ class LSLTCPEpisodeCollector:
                 time.sleep(0.001)
         
         print(f"📡 LSLデータ受信終了")
-    
-    def _on_tcp_message_received(self, message_data: Dict[str, Any]):
-        """TCP メッセージ受信時のコールバック"""
-        tcp_timestamp = time.time()
-        
-        # 文字列メッセージの場合（EPISODE_ENDなど）
-        if isinstance(message_data, str):
-            message_str = message_data.strip()
-            if message_str == "EPISODE_END":
-                print(f"🎯 EPISODE_ENDトリガー検出")
-                
-                # 直前のJSONデータを検索
-                previous_json_data = self._get_previous_json_data()
-                if previous_json_data:
-                    robot_episode_id = previous_json_data.get('episode', 'unknown')
-                    print(f"📋 直前のJSONデータを採用: episode={robot_episode_id}")
-                    
-                    trigger_info = {
-                        'tcp_data': previous_json_data,  # 直前のJSONデータを使用
-                        'tcp_timestamp': tcp_timestamp,  # EPISODE_END受信時刻
-                        'trigger_timestamp': tcp_timestamp,
-                        'trigger_type': 'EPISODE_END'
-                    }
-                    self.trigger_queue.put(trigger_info)
-                    self.stats['total_triggers'] += 1
-                else:
-                    print(f"⚠️ 直前のJSONデータが見つかりません")
-            return
-        
-        # 辞書型メッセージの場合（ロボット状態データ）
-        if isinstance(message_data, dict):
-            # TCPデータをバッファに追加
-            tcp_entry = {
-                'data': message_data,
-                'timestamp': tcp_timestamp
-            }
-            self.tcp_data_buffer.append(tcp_entry)
-            
-            # ロボット状態データかをチェック
-            if self._is_robot_state_data(message_data):
-                robot_episode = message_data.get('episode', 'unknown')
-                grip_force = message_data.get('grip_force', 'unknown')
-                print(f"📋 ロボット状態データ受信: episode={robot_episode}, grip_force={grip_force}")
     
     def _get_previous_json_data(self) -> Optional[Dict[str, Any]]:
         """直前のJSONデータ（ロボット状態データ）を取得"""
@@ -404,7 +379,8 @@ class LSLTCPEpisodeCollector:
                     self.stats['successful_episodes'] += 1
                     
                     # CSVファイルに保存
-                    self._save_episode_to_csv(episode)
+                    if self.save_to_csv:
+                        self._save_episode_to_csv(episode)
                     
                     print(f"✅ エピソード{episode.episode_id}保存完了 "
                           f"(同期遅延: {episode.sync_latency:.1f}ms)")
@@ -611,94 +587,34 @@ class LSLTCPEpisodeCollector:
             print(f"   成功率             : {success_rate:.1f}%")
         print(f"   平均同期遅延       : {avg_latency:.1f}ms")
         print(f"   出力ディレクトリ   : {self.output_dir}")
-    
-    def run_demo(self):
-        """デモ実行（単体動作テスト用）"""
-        print(f"🚀 LSL-TCP同期エピソード収集デモ開始")
-        
-        # データ収集開始
-        if not self.start_collection():
-            print(f"❌ システム開始失敗")
-            return
-        
-        try:
-            print(f"\n💡 デモ実行中:")
-            print(f"   1. LSLデータ受信中（{self.lsl_stream_name}）")
-            print(f"   2. TCP待機中（{self.tcp_host}:{self.tcp_port}）")
-            print(f"   3. EPISODE_ENDでエピソード収集")
-            print(f"   4. Ctrl+C で終了")
-            print(f"\n📝 Unity側でTCPメッセージを送信してください:")
-            print(f"   1. ロボット状態データ（10回程度）:")
-            print(f"      {{\"episode\": 1, \"grip_force\": 10.5, \"position\": [0,0,0], ...}}")
-            print(f"   2. エピソード終了トリガー:")
-            print(f"      \"EPISODE_END\"")
-            print(f"   → 直前のロボット状態データとLSLデータを組み合わせてエピソード保存")
-            
-            # メインループ
-            while self.is_running:
-                time.sleep(1.0)
-                
-                # 5秒ごとに状態表示
-                if int(time.time()) % 5 == 0:
-                    lsl_buffer_size = len(self.lsl_data_buffer)
-                    tcp_buffer_size = len(self.tcp_data_buffer)
-                    print(f"💻 状態: LSL={lsl_buffer_size}サンプル, "
-                          f"TCP={tcp_buffer_size}メッセージ, "
-                          f"エピソード={self.stats['successful_episodes']}件")
-                
-        except KeyboardInterrupt:
-            print(f"\n⏹️ デモ停止（Ctrl+C）")
-        finally:
-            self.stop_collection()
-
+        print(f"   TCP自動応答        : 無効（学習側制御）")
 
 if __name__ == '__main__':
-    print("🧠 LSL-TCP同期エピソード収集システム")
+    print("🧠 LSL-TCP同期エピソード収集システム（自動応答無効化済み）")
     print("=" * 60)
-    print("選択してください:")
-    print("1. CSV保存モード（デフォルト）")
-    print("2. リアルタイム処理モード（DDPG学習等）")
-    print("3. ハイブリッドモード（CSV保存+リアルタイム処理）")
     
-    choice = input("選択 (1-3): ").strip()
-    
-    if choice == "2":
-        # リアルタイム処理モードの例
-        def on_episode_created(episode: Episode):
-            """エピソード作成時のコールバック例（DDPG学習用）"""
-            print(f"🤖 DDPG学習用: エピソード{episode.episode_id}を受信")
-            print(f"   EEGデータ形状: {episode.lsl_data.shape}")
-            print(f"   ロボット状態: grip_force={episode.tcp_data.get('grip_force')}, "
-                  f"broken={episode.tcp_data.get('broken')}")
-            
-            # ここでDDPG学習システムにデータを送信
-            # ddpg_system.process_episode(episode.lsl_data, episode.tcp_data)
-        
-        collector = LSLTCPEpisodeCollector(
-            save_to_csv=False,  # CSV保存無効
-            enable_realtime_processing=True  # リアルタイム処理有効
-        )
-        collector.add_episode_callback(on_episode_created)
-        
-    elif choice == "3":
-        # ハイブリッドモードの例
-        def on_episode_created(episode: Episode):
-            """エピソード作成時のコールバック例"""
-            print(f"🔄 ハイブリッド処理: エピソード{episode.episode_id}")
-            # DDPG学習とCSV保存を同時実行
-        
-        collector = LSLTCPEpisodeCollector(
-            save_to_csv=True,   # CSV保存有効
-            enable_realtime_processing=True  # リアルタイム処理有効
-        )
-        collector.add_episode_callback(on_episode_created)
-        
-    else:
-        # デフォルト：CSV保存モード
-        collector = LSLTCPEpisodeCollector(
-            save_to_csv=True,   # CSV保存有効
-            enable_realtime_processing=False  # リアルタイム処理無効
-        )
+    collector = LSLTCPEpisodeCollector(
+        save_to_csv=True,   # CSV保存有効
+        enable_realtime_processing=False  # リアルタイム処理無効
+    )
     
     # システム実行
-    collector.run_demo()
+    if collector.start_collection():
+        try:
+            print(f"\n💡 システム実行中（自動応答無効化済み）:")
+            print(f"   1. LSL受信中: MockEEG")
+            print(f"   2. TCP待機中: 127.0.0.1:12345")
+            print(f"   3. 学習側制御: 把持力は学習システムが決定")
+            print(f"   4. Ctrl+C で終了")
+            
+            while collector.is_running:
+                time.sleep(5)
+                if collector.stats['successful_episodes'] > 0:
+                    print(f"📊 進捗: {collector.stats['successful_episodes']}エピソード収集済み")
+                
+        except KeyboardInterrupt:
+            print(f"\n⏹️ 停止要求")
+        finally:
+            collector.stop_collection()
+    else:
+        print(f"❌ システム開始失敗")
