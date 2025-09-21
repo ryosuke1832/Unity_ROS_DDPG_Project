@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
 """
-TypeA DDPG学習システム（修正版・即効パッチ適用済み）
+TypeA DDPG学習システム（包括的修正版）
 
 修正点：
-1. 停止条件を「収集済みエピソード数」に基づかせる
-2. 実エピソード数でself.episode_countを更新
-3. ループ終了時にフラグを落としてから保存
-4. スレッドをデーモンにしない
-5. 停止時の保存条件を「データの有無」で判定
-
-これにより以下の問題を解決：
-- 400エピソードで停止しない問題
-- ログが保存されない問題
-- デーモンスレッド由来のstdoutロック例外
+1. 把持力リクエスト受理条件の大幅拡張
+2. Collector(12345)→DDPG(12346)の状態橋渡し機能追加
+3. 健全性チェック機能実装
+4. エラーハンドリング・ログ機能強化
+5. Unity互換性向上
 """
 
 import numpy as np
@@ -157,8 +152,76 @@ class AnalysisUtils:
         indices = np.where(y_values >= threshold)[0]
         return int(indices[0]) if len(indices) > 0 else None
 
+class SystemHealthChecker:
+    """システム健全性チェッククラス（新追加）"""
+    
+    def __init__(self):
+        self.checks = {}
+        self.last_check_time = time.time()
+        self.check_interval = 10.0  # 10秒間隔
+    
+    def register_check(self, name: str, check_func, critical: bool = False):
+        """チェック項目を登録"""
+        self.checks[name] = {
+            'func': check_func,
+            'critical': critical,
+            'last_result': None,
+            'last_check': None
+        }
+    
+    def run_health_checks(self) -> dict:
+        """健全性チェック実行"""
+        current_time = time.time()
+        if current_time - self.last_check_time < self.check_interval:
+            return None
+        
+        results = {}
+        critical_failures = []
+        
+        for name, check_info in self.checks.items():
+            try:
+                result = check_info['func']()
+                check_info['last_result'] = result
+                check_info['last_check'] = current_time
+                results[name] = result
+                
+                if check_info['critical'] and not result.get('success', False):
+                    critical_failures.append(name)
+                    
+            except Exception as e:
+                error_result = {'success': False, 'error': str(e)}
+                check_info['last_result'] = error_result
+                results[name] = error_result
+                
+                if check_info['critical']:
+                    critical_failures.append(name)
+        
+        self.last_check_time = current_time
+        
+        # 重要な問題がある場合は警告
+        if critical_failures:
+            print(f"⚠️ 重要な健全性チェック失敗: {critical_failures}")
+        
+        return results
+    
+    def get_status_summary(self) -> str:
+        """状態サマリーを取得"""
+        if not self.checks:
+            return "❓ チェック項目未登録"
+        
+        total = len(self.checks)
+        success = sum(1 for check in self.checks.values() 
+                     if check['last_result'] and check['last_result'].get('success', False))
+        
+        if success == total:
+            return f"✅ 健全 ({success}/{total})"
+        elif success > total * 0.7:
+            return f"⚠️ 注意 ({success}/{total})"
+        else:
+            return f"❌ 問題 ({success}/{total})"
+
 class TypeADDPGSystem:
-    """TypeA DDPG学習システム（即効パッチ適用済み）"""
+    """TypeA DDPG学習システム（包括的修正版）"""
     
     def __init__(self, experiment_type="A_400", seed=42):
         """
@@ -237,8 +300,10 @@ class TypeADDPGSystem:
         self.pending_action = None
         self.episode_count = 0  # 表示・進捗用のカウンタ
         
-        # 状態管理（修正: 直近のロボット状態を保持）
+        # ★ 修正: 状態管理強化（直近のロボット状態を保持）
         self.last_tcp_data = None
+        self.last_tcp_data_timestamp = None
+        self.collector_state_cache = None  # Collector側の状態キャッシュ
         
         # 統計（エピソードごと）
         self.episode_data = []  # 各エピソードの詳細データ
@@ -251,12 +316,84 @@ class TypeADDPGSystem:
             'contact_bonus': 2.0
         }
         
-        print(f"🤖 TypeA DDPG学習システム初期化完了（リクエスト型修正済み）")
+        # ★ 新追加: 健全性チェックシステム
+        self.health_checker = SystemHealthChecker()
+        self._setup_health_checks()
+        
+        # ★ 新追加: リクエスト処理統計
+        self.request_stats = {
+            'total_requests': 0,
+            'json_requests': 0,
+            'text_requests': 0,
+            'successful_responses': 0,
+            'failed_responses': 0,
+            'state_context_available': 0,
+            'state_context_missing': 0,
+            'collector_fallbacks': 0
+        }
+        
+        print(f"🤖 TypeA DDPG学習システム初期化完了（包括的修正版）")
         print(f"   実験タイプ: {experiment_type}")
         print(f"   シード: {seed}")
         print(f"   目標エピソード数: {self.target_episodes}")
         print(f"   対称正規化: {self.force_min}-{self.force_max}N → [-1,1]")
         print(f"   出力ディレクトリ: {self.output_dir}")
+        print(f"   健全性チェック: 有効")
+        print(f"   状態橋渡し機能: 有効")
+    
+    def _setup_health_checks(self):
+        """健全性チェック項目の設定"""
+        
+        def check_tcp_connection():
+            """TCP接続状態チェック"""
+            return {
+                'success': self.tcp_interface.is_connected,
+                'details': f"接続済み: {self.tcp_interface.client_address}" if self.tcp_interface.is_connected else "未接続"
+            }
+        
+        def check_episode_collector():
+            """エピソード収集システムチェック"""
+            if not self.episode_collector:
+                return {'success': False, 'details': '収集システム未初期化'}
+            
+            return {
+                'success': self.episode_collector.is_running,
+                'details': f"稼働中, エピソード数: {len(self.episode_collector.episodes)}"
+            }
+        
+        def check_state_availability():
+            """状態データ可用性チェック"""
+            ddpg_state_age = None
+            collector_state_age = None
+            
+            if self.last_tcp_data_timestamp:
+                ddpg_state_age = (time.time() - self.last_tcp_data_timestamp)
+            
+            if (self.episode_collector and 
+                hasattr(self.episode_collector.tcp_interface, 'last_robot_state_timestamp') and
+                self.episode_collector.tcp_interface.last_robot_state_timestamp):
+                collector_state_age = (time.time() - self.episode_collector.tcp_interface.last_robot_state_timestamp)
+            
+            has_recent_state = (ddpg_state_age and ddpg_state_age < 30) or (collector_state_age and collector_state_age < 30)
+            
+            return {
+                'success': has_recent_state,
+                'details': f"DDPG状態: {ddpg_state_age:.1f}s前, Collector状態: {collector_state_age:.1f}s前" if ddpg_state_age or collector_state_age else "状態データなし"
+            }
+        
+        def check_learning_progress():
+            """学習進捗チェック"""
+            buffer_ratio = len(self.replay_buffer) / self.replay_buffer.capacity
+            return {
+                'success': True,
+                'details': f"バッファ利用率: {buffer_ratio:.1%}, エピソード: {self.episode_count}/{self.target_episodes}"
+            }
+        
+        # チェック項目登録
+        self.health_checker.register_check("tcp_connection", check_tcp_connection, critical=True)
+        self.health_checker.register_check("episode_collector", check_episode_collector, critical=True)
+        self.health_checker.register_check("state_availability", check_state_availability, critical=False)
+        self.health_checker.register_check("learning_progress", check_learning_progress, critical=False)
     
     def _handle_tcp_state(self, message_data):
         """TCP状態メッセージ処理（ロボット状態を保持）"""
@@ -264,9 +401,43 @@ class TypeADDPGSystem:
             # JSONのロボット状態（episode/grip_force等）が来たときに更新
             if isinstance(message_data, dict) and 'episode' in message_data and 'grip_force' in message_data:
                 self.last_tcp_data = message_data
-                print(f"📊 ロボット状態更新: ep={message_data.get('episode')}, force={message_data.get('grip_force'):.2f}N")
+                self.last_tcp_data_timestamp = time.time()
+                print(f"📊 DDPG側ロボット状態更新: ep={message_data.get('episode')}, force={message_data.get('grip_force'):.2f}N")
         except Exception as e:
             print(f"⚠️ TCP状態処理エラー: {e}")
+    
+    def _handle_collector_state_update(self, message_data):
+        """Collector側状態更新ハンドラ（新機能）"""
+        try:
+            if isinstance(message_data, dict) and 'episode' in message_data and 'grip_force' in message_data:
+                self.collector_state_cache = message_data.copy()
+                print(f"🔗 Collector状態キャッシュ更新: ep={message_data.get('episode')}, force={message_data.get('grip_force'):.2f}N")
+        except Exception as e:
+            print(f"⚠️ Collector状態更新エラー: {e}")
+    
+    def _get_best_available_state(self):
+        """最適な利用可能状態を取得（フォールバック機能）"""
+        current_time = time.time()
+        
+        # 1. DDPG側の直近状態をチェック
+        if self.last_tcp_data and self.last_tcp_data_timestamp:
+            age = current_time - self.last_tcp_data_timestamp
+            if age < 30:  # 30秒以内
+                return self.last_tcp_data, 'ddpg_direct'
+        
+        # 2. Collector側のキャッシュをチェック
+        if self.collector_state_cache:
+            return self.collector_state_cache, 'collector_cache'
+        
+        # 3. Collector側の最新状態を直接取得
+        if self.episode_collector:
+            collector_state = self.episode_collector.tcp_interface.get_last_robot_state()
+            if collector_state and collector_state['age_ms'] < 30000:  # 30秒以内
+                self.request_stats['collector_fallbacks'] += 1
+                return collector_state['data'], 'collector_direct'
+        
+        # 4. 最終的なフォールバック
+        return None, 'none'
     
     def normalize_force(self, force):
         """把持力の対称正規化 [8-15N] → [-1,1]"""
@@ -384,41 +555,65 @@ class TypeADDPGSystem:
             target_param.data.copy_(target_param.data * (1.0 - tau) + param.data * tau)
     
     def handle_grip_force_request(self, message_data):
-        """Unityからの把持力リクエスト処理（JSON・テキスト両対応）"""
+        """Unityからの把持力リクエスト処理（包括的修正版）"""
         try:
-            # JSONリクエストの場合
-            is_json_request = (isinstance(message_data, dict) and 
-                             message_data.get('type') == 'grip_force_request')
+            self.request_stats['total_requests'] += 1
             
-            # テキストリクエストの場合
+            # ★ 修正1: 受理条件の大幅拡張（複数パターン対応）
+            message_type = message_data.get('type', '').lower() if isinstance(message_data, dict) else ''
+            
+            # JSON形式のリクエスト判定（複数パターン）
+            json_request_types = [
+                'grip_force_request',     # 標準
+                'request_grip_force',     # 逆順
+                'grip_request',           # 簡略
+                'force_request',          # さらに簡略
+                'grip_force_command_request',  # 詳細
+                'robot_grip_request'      # ロボット用
+            ]
+            
+            is_json_request = (isinstance(message_data, dict) and 
+                             (message_type in json_request_types or
+                              any(keyword in message_type for keyword in ['grip', 'force', 'request'])))
+            
+            # テキスト形式のリクエスト判定
             is_text_request = (isinstance(message_data, dict) and 
                              message_data.get('type') == 'text_message' and 
-                             message_data.get('content') == 'REQUEST_GRIP_FORCE')
+                             message_data.get('content', '').upper().strip() == 'REQUEST_GRIP_FORCE')
             
-            # いずれでもない場合は無視
-            if not (is_json_request or is_text_request):
-                return
+            # 直接テキストの場合（後方互換性）
+            is_direct_text = (isinstance(message_data, str) and 
+                            message_data.upper().strip() == 'REQUEST_GRIP_FORCE')
             
-            print(f"🎯 把持力リクエスト検出: {'JSON' if is_json_request else 'TEXT'}")
+            if not (is_json_request or is_text_request or is_direct_text):
+                return  # 把持力リクエストではない
             
-            # 状態作成用のTCPデータを決定
+            # リクエストタイプ統計
             if is_json_request:
-                # JSONリクエストの場合はそのデータを使用
-                tcp_data = message_data
+                self.request_stats['json_requests'] += 1
+                print(f"🎯 JSON把持力リクエスト検出: {message_type}")
+            elif is_text_request or is_direct_text:
+                self.request_stats['text_requests'] += 1
+                print(f"🎯 テキスト把持力リクエスト検出: REQUEST_GRIP_FORCE")
+            
+            # ★ 修正2: 状態コンテキストの取得（フォールバック機能付き）
+            tcp_data, source = self._get_best_available_state()
+            
+            if tcp_data:
+                self.request_stats['state_context_available'] += 1
+                episode = tcp_data.get('episode', 'unknown')
+                grip_force = tcp_data.get('grip_force', 'unknown')
+                print(f"📊 状態コンテキスト取得成功 [{source}]: ep={episode}, force={grip_force}")
             else:
-                # テキストリクエストの場合は直近のロボット状態を使用
-                if self.last_tcp_data is None:
-                    print(f"⚠️ REQUEST_GRIP_FORCE を受信しましたが、直近のロボット状態がないため pending を設定できません")
-                    # デフォルト状態で処理を続行
-                    tcp_data = {
-                        'grip_force': self.force_center,
-                        'contact': False,
-                        'broken': False,
-                        'episode': 0
-                    }
-                else:
-                    tcp_data = self.last_tcp_data
-                    print(f"📊 直近状態を使用: ep={tcp_data.get('episode')}, force={tcp_data.get('grip_force', 0):.2f}N")
+                self.request_stats['state_context_missing'] += 1
+                print(f"⚠️ 状態コンテキスト取得失敗 - デフォルト状態を使用")
+                # デフォルト状態作成
+                tcp_data = {
+                    'grip_force': self.force_center,
+                    'contact': False,
+                    'broken': False,
+                    'episode': self.episode_count
+                }
             
             # 前回のアクション値
             prev_action = 0.0 if self.pending_action is None else self.pending_action[0]
@@ -438,35 +633,56 @@ class TypeADDPGSystem:
             grip_force = np.clip(grip_force, 5.0, 25.0)  # 安全クランプ
             
             print(f"🤖 TypeA把持力決定: {grip_force:.2f}N (action: {action[0]:.3f}, noise_σ: {self.noise.sigma:.3f})")
+            print(f"   状態ソース: {source}, エピソード: {tcp_data.get('episode')}")
             
-            # TCP応答送信
-            response = {
-                'type': 'grip_force_command',
-                'target_force': float(grip_force),
-                'timestamp': time.time(),
-                'session_id': f"typea_{self.experiment_type}_seed{self.seed}_{int(time.time())}"
-            }
-            self.tcp_interface.send_message(response)
+            # ★ 修正3: Unity互換性を考慮したTCP応答送信
+            response = self._create_grip_force_response(grip_force, tcp_data, source)
+            
+            success = self.tcp_interface.send_message(response)
+            
+            if success:
+                self.request_stats['successful_responses'] += 1
+                print(f"✅ 把持力コマンド送信成功")
+            else:
+                self.request_stats['failed_responses'] += 1
+                print(f"❌ 把持力コマンド送信失敗")
             
         except Exception as e:
+            self.request_stats['failed_responses'] += 1
             print(f"❌ 把持力リクエスト処理エラー: {e}")
             import traceback
             traceback.print_exc()
     
-    def run_learning(self):
-        """TypeA DDPG学習実行"""
-        print(f"🚀 TypeA DDPG学習開始 ({self.experiment_type}, seed={self.seed})")
+    def _create_grip_force_response(self, grip_force, tcp_data, source):
+        """把持力応答メッセージ作成（Unity互換性考慮）"""
+        response = {
+            'type': 'grip_force_command',
+            'target_force': float(grip_force),     # Python標準
+            'targetForce': float(grip_force),      # Unity C# キャメルケース
+            'force': float(grip_force),            # 簡易形式
+            'timestamp': time.time(),
+            'session_id': f"typea_{self.experiment_type}_seed{self.seed}_{int(time.time())}",
+            'episode_number': tcp_data.get('episode', self.episode_count),
+            'episodeNumber': tcp_data.get('episode', self.episode_count),  # キャメルケース
+            'state_source': source,
+            'learning_episode': len(self.episode_data),
+            'experiment_type': self.experiment_type,
+            'seed': self.seed
+        }
         
-        # エピソード収集システム初期化（★ 修正: auto_reply=False で自動応答を無効化）
+        return response
+    
+    def run_learning(self):
+        """TypeA DDPG学習実行（包括的修正版）"""
+        print(f"🚀 TypeA DDPG学習開始（包括的修正版） ({self.experiment_type}, seed={self.seed})")
+        
+        # エピソード収集システム初期化（auto_reply=False で自動応答を無効化）
         self.episode_collector = LSLTCPEpisodeCollector(
             lsl_stream_name='MockEEG',
             tcp_host='127.0.0.1',
             tcp_port=12345,
             save_to_csv=True
         )
-        
-        # ★ 重要: episode_collectorの内部EEGTCPInterfaceも自動応答を無効化する必要
-        # （LSLTCPEpisodeCollectorが修正済みであることを前提）
         
         if not self.episode_collector.start_collection():
             print("❌ エピソード収集開始失敗")
@@ -477,42 +693,51 @@ class TypeADDPGSystem:
             print("❌ TCP通信開始失敗")
             return False
         
-        # コールバック設定
+        # ★ 修正4: コールバック設定（状態橋渡し機能付き）
         print("🔗 TCPコールバック設定中...")
+        
+        # DDPG側（12346）のコールバック
         self.tcp_interface.add_message_callback(self._handle_tcp_state)  # ロボット状態保持用
         self.tcp_interface.add_message_callback(self.handle_grip_force_request)  # 把持力リクエスト処理用
+        
+        # ★ 新機能: Collector側（12345）からDDPG側への状態橋渡し
+        self.episode_collector.tcp_interface.add_state_update_callback(self._handle_collector_state_update)
+        print("   🌉 Collector→DDPG状態橋渡し設定完了")
+        
         print("✅ TCPコールバック設定完了")
         print("📋 ポート設定:")
         print("   エピソード収集: 127.0.0.1:12345 (自動応答無効)")
         print("   学習システム: 127.0.0.1:12346 (自動応答無効)")
-        print("💡 Unity接続先: 12346ポートに接続してください")
+        print("💡 Unity接続推奨: 12346ポートに接続してください")
+        print("🔗 状態データ: 12345→12346自動橋渡し有効")
         
-        # 学習ループ開始（★ daemon=False に変更）
+        # 学習ループ開始（daemon=False）
         self.is_running = True
         self.learning_thread = threading.Thread(target=self._learning_loop, daemon=False)
         self.learning_thread.start()
         
-        print(f"✅ TypeA学習開始完了")
+        print(f"✅ TypeA学習開始完了（包括的修正版）")
         return True
     
     def _learning_loop(self):
-        """学習ループ（即効パッチ適用済み）"""
-        print(f"🔄 TypeA学習ループ開始（Pending方式・即効パッチ適用済み）")
+        """学習ループ（包括的修正版）"""
+        print(f"🔄 TypeA学習ループ開始（Pending方式・包括的修正版）")
         
         last_episode_count = 0
+        last_health_check = time.time()
+        last_stats_print = time.time()
         
-        # ★ パッチ1: 停止条件を「収集済みエピソード数」に基づかせる
         while self.is_running:
             try:
                 current_episode_count = len(self.episode_collector.episodes)
                 
-                # ★ 収集済みが目標に到達したら終了
+                # 停止条件チェック
                 if current_episode_count >= self.target_episodes:
                     print(f"🎯 目標エピソード数到達: {current_episode_count}/{self.target_episodes}")
                     break
                 
+                # 新しいエピソードの処理
                 if current_episode_count > last_episode_count:
-                    # 新しいエピソードを処理
                     for i in range(last_episode_count, current_episode_count):
                         episode = self.episode_collector.episodes[i]
                         
@@ -526,7 +751,7 @@ class TypeADDPGSystem:
                             # 次状態作成
                             next_state = self.create_state(episode.tcp_data, self.pending_action[0])
                             
-                            # 経験バッファに追加（done=True: K=1設計）
+                            # 経験バッファに追加
                             self.replay_buffer.push(
                                 self.pending_state,
                                 self.pending_action,
@@ -554,10 +779,7 @@ class TypeADDPGSystem:
                             if len(self.episode_data) % 100 == 0:
                                 self._save_model()
                         else:
-                            # フォールバック: EPISODE_ENDフォールバック（推奨追加機能）
                             print(f"⚠️ Pending状態なしでEPISODE_END受信: episode={episode.episode_id}")
-                            print(f"   直近状態: {self.last_tcp_data is not None}")
-                            print(f"   この場合は学習ステップをスキップします")
                         
                         # Pending状態リセット
                         self.pending_state = None
@@ -565,8 +787,22 @@ class TypeADDPGSystem:
                     
                     last_episode_count = current_episode_count
                 
-                # ★ パッチ2: 表示・停止用のカウンタは「収集済み実数」に同期
+                # エピソードカウンタ同期
                 self.episode_count = current_episode_count
+                
+                # ★ 新機能: 定期的な健全性チェック
+                current_time = time.time()
+                if current_time - last_health_check > 30:  # 30秒ごと
+                    health_results = self.health_checker.run_health_checks()
+                    if health_results:
+                        status = self.health_checker.get_status_summary()
+                        print(f"🏥 システム健全性: {status}")
+                    last_health_check = current_time
+                
+                # 定期的な統計表示
+                if current_time - last_stats_print > 60:  # 60秒ごと
+                    self._print_request_statistics()
+                    last_stats_print = current_time
                 
                 time.sleep(0.1)
                 
@@ -574,10 +810,25 @@ class TypeADDPGSystem:
                 print(f"❌ 学習ループエラー: {e}")
                 time.sleep(1.0)
         
-        # ★ パッチ3: ループ終了時にフラグを落としてから保存
         print(f"✅ TypeA学習ループ完了: {self.episode_count}エピソード")
         self.is_running = False
         self._save_final_results()
+    
+    def _print_request_statistics(self):
+        """リクエスト処理統計表示"""
+        stats = self.request_stats
+        total = stats['total_requests']
+        
+        if total > 0:
+            success_rate = stats['successful_responses'] / total * 100
+            context_rate = stats['state_context_available'] / total * 100
+            
+            print(f"\n📊 リクエスト処理統計:")
+            print(f"   総リクエスト数: {total}")
+            print(f"   JSON/テキスト: {stats['json_requests']}/{stats['text_requests']}")
+            print(f"   成功率: {success_rate:.1f}%")
+            print(f"   状態コンテキスト取得率: {context_rate:.1f}%")
+            print(f"   Collectorフォールバック: {stats['collector_fallbacks']}")
     
     def _record_episode_data(self, episode, reward, actor_loss, critic_loss, avg_q):
         """エピソードデータの記録"""
@@ -631,6 +882,7 @@ class TypeADDPGSystem:
         print(f"   破損率（最新50）: {damage_rate:.1%}")
         print(f"   バッファサイズ: {len(self.replay_buffer)}")
         print(f"   探索ノイズσ: {self.noise.sigma:.3f}")
+        print(f"   健全性: {self.health_checker.get_status_summary()}")
     
     def _save_model(self):
         """モデル保存"""
@@ -643,7 +895,8 @@ class TypeADDPGSystem:
                 'critic_optimizer': self.critic_optimizer.state_dict(),
                 'episode_count': len(self.episode_data),
                 'experiment_type': self.experiment_type,
-                'seed': self.seed
+                'seed': self.seed,
+                'request_stats': self.request_stats
             }, model_path)
         except Exception as e:
             print(f"⚠️ モデル保存エラー: {e}")
@@ -689,19 +942,19 @@ class TypeADDPGSystem:
         }
     
     def _save_final_results(self):
-        """最終結果保存"""
+        """最終結果保存（包括的修正版）"""
         print(f"💾 最終結果保存中...")
         
-        # ★ パッチ適用: データが空でも最低限の統計は保存
         if len(self.episode_data) == 0:
             print(f"⚠️ 学習データがありませんが、基本情報を保存します")
-            # 最低限の情報を保存
             basic_stats = {
                 'experiment_type': self.experiment_type,
                 'seed': self.seed,
                 'total_episodes': self.episode_count,
                 'target_episodes': self.target_episodes,
                 'learning_episodes': 0,
+                'request_stats': self.request_stats,
+                'health_summary': self.health_checker.get_status_summary(),
                 'message': 'No learning data collected'
             }
             json_path = os.path.join(self.output_dir, 'final_stats.json')
@@ -721,7 +974,7 @@ class TypeADDPGSystem:
         csv_data = {
             'episode': df['episode'],
             'reward': df['reward'],
-            'success_rate': df['success_rate_ma100'],  # 移動平均
+            'success_rate': df['success_rate_ma100'],
             'force_error': df['force_error'],
             'damage_rate': df['broken'].astype(int)
         }
@@ -732,7 +985,7 @@ class TypeADDPGSystem:
         # 高度な指標計算
         advanced_metrics = self._calculate_advanced_metrics()
         
-        # final_stats.json保存
+        # final_stats.json保存（包括的修正版）
         final_stats = {
             'experiment_type': self.experiment_type,
             'seed': self.seed,
@@ -740,6 +993,8 @@ class TypeADDPGSystem:
             'target_episodes': self.target_episodes,
             'learning_episodes': len(self.episode_data),
             **advanced_metrics,
+            'request_stats': self.request_stats,
+            'health_summary': self.health_checker.get_status_summary(),
             'reward_parameters': self.reward_params,
             'force_normalization': {
                 'center': self.force_center,
@@ -760,7 +1015,9 @@ class TypeADDPGSystem:
             'plateau_value': advanced_metrics['plateau_value'],
             'plateau_at_episode': advanced_metrics['plateau_episode'],
             'final_success_rate_at_400': advanced_metrics['success_moving_average'][399] if len(advanced_metrics['success_moving_average']) > 399 else None,
-            'final_success_rate': advanced_metrics['final_success_rate']
+            'final_success_rate': advanced_metrics['final_success_rate'],
+            'request_success_rate': self.request_stats['successful_responses'] / max(self.request_stats['total_requests'], 1),
+            'state_context_rate': self.request_stats['state_context_available'] / max(self.request_stats['total_requests'], 1)
         }
         
         master_auc_path = os.path.join(self.output_dir, 'master_auc.json')
@@ -778,6 +1035,8 @@ class TypeADDPGSystem:
         print(f"   最終成功率: {advanced_metrics['final_success_rate']:.1%}")
         print(f"   AUC(0-400): {advanced_metrics['auc_0_400']:.2f}")
         print(f"   AUC(全域): {advanced_metrics['auc_all']:.2f}")
+        print(f"   リクエスト処理成功率: {master_auc['request_success_rate']:.1%}")
+        print(f"   状態コンテキスト取得率: {master_auc['state_context_rate']:.1%}")
         if advanced_metrics['time_to_70'] is not None:
             print(f"   Time-to-70%: Episode {advanced_metrics['time_to_70']}")
         if advanced_metrics['plateau_value'] is not None:
@@ -787,7 +1046,7 @@ class TypeADDPGSystem:
         """学習曲線のプロット"""
         try:
             fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-            fig.suptitle(f'TypeA DDPG Learning Curves ({self.experiment_type}, seed={self.seed})')
+            fig.suptitle(f'TypeA DDPG Learning Curves (Fixed Ver. - {self.experiment_type}, seed={self.seed})')
             
             episodes = df['episode'].values
             
@@ -852,7 +1111,7 @@ class TypeADDPGSystem:
             print(f"⚠️ プロット保存エラー: {e}")
     
     def stop_learning(self):
-        """学習停止（即効パッチ適用済み）"""
+        """学習停止（包括的修正版）"""
         print(f"🛑 TypeA学習停止中...")
         
         self.is_running = False
@@ -863,22 +1122,26 @@ class TypeADDPGSystem:
         if self.tcp_interface:
             self.tcp_interface.stop_server()
         
-        # ★ パッチ5: 停止時の保存条件を「データの有無」で判定
+        # 最終統計表示
+        self._print_request_statistics()
+        print(f"🏥 最終健全性: {self.health_checker.get_status_summary()}")
+        
+        # データがある場合のみ結果保存
         if len(self.episode_data) > 0:
             self._save_final_results()
         
-        # 学習スレッドの終了を待つ（daemon=Falseなので）
+        # 学習スレッドの終了を待つ
         if self.learning_thread and self.learning_thread.is_alive():
             print(f"⏳ 学習スレッド終了待機中...")
-            self.learning_thread.join(timeout=10)  # 最大10秒待機
+            self.learning_thread.join(timeout=10)
             if self.learning_thread.is_alive():
                 print(f"⚠️ 学習スレッドが10秒以内に終了しませんでした")
             else:
                 print(f"✅ 学習スレッド正常終了")
         
-        print(f"✅ TypeA学習停止完了")
+        print(f"✅ TypeA学習停止完了（包括的修正版）")
 
-# 集計スクリプト
+# 集計スクリプト（既存のままで問題なし）
 def aggregate_multiple_seeds(base_dir, experiment_type, seeds):
     """複数シードの結果を集計"""
     print(f"📊 複数シード結果集計: {experiment_type}, seeds={seeds}")
@@ -912,7 +1175,8 @@ def aggregate_multiple_seeds(base_dir, experiment_type, seeds):
         return
     
     # 統計計算
-    metrics = ['auc_0_400', 'auc_all', 'final_success_rate', 'time_to_70', 'plateau_value']
+    metrics = ['auc_0_400', 'auc_all', 'final_success_rate', 'time_to_70', 'plateau_value', 
+               'request_success_rate', 'state_context_rate']
     aggregated = {}
     
     for metric in metrics:
@@ -928,15 +1192,15 @@ def aggregate_multiple_seeds(base_dir, experiment_type, seeds):
     aggregated['experiment_type'] = experiment_type
     
     # 結果保存
-    output_path = Path(base_dir) / f"aggregated_{experiment_type}.json"
+    output_path = Path(base_dir) / f"aggregated_{experiment_type}_fixed.json"
     with open(output_path, 'w') as f:
         json.dump(aggregated, f, indent=2)
     
     print(f"✅ 集計結果保存: {output_path}")
     
     # サマリー表示
-    print(f"\n📈 {experiment_type} 集計結果 (n={len(all_results)}):")
-    for metric in ['auc_0_400', 'auc_all', 'final_success_rate']:
+    print(f"\n📈 {experiment_type} 集計結果（包括的修正版） (n={len(all_results)}):")
+    for metric in ['auc_0_400', 'auc_all', 'final_success_rate', 'request_success_rate']:
         if f'{metric}_mean' in aggregated:
             mean_val = aggregated[f'{metric}_mean']
             ci_val = aggregated[f'{metric}_ci95']
@@ -944,7 +1208,7 @@ def aggregate_multiple_seeds(base_dir, experiment_type, seeds):
 
 def main():
     """メイン実行関数"""
-    parser = argparse.ArgumentParser(description="TypeA DDPG学習システム（即効パッチ適用済み）")
+    parser = argparse.ArgumentParser(description="TypeA DDPG学習システム（包括的修正版）")
     parser.add_argument("--type", choices=["A_400", "A_long"], default="A_400",
                        help="実験タイプ")
     parser.add_argument("--seed", type=int, default=42,
@@ -956,15 +1220,15 @@ def main():
     
     args = parser.parse_args()
     
-    print(f"🤖 TypeA DDPG学習システム（即効パッチ適用済み）")
-    print(f"=" * 60)
+    print(f"🤖 TypeA DDPG学習システム（包括的修正版）")
+    print(f"=" * 70)
     print(f"修正内容:")
-    print(f"  1. 停止条件を「収集済みエピソード数」に基づかせる")
-    print(f"  2. 実エピソード数でepisode_countを更新")
-    print(f"  3. ループ終了時にフラグを落としてから保存")
-    print(f"  4. スレッドをデーモンにしない")
-    print(f"  5. 停止時の保存条件を「データの有無」で判定")
-    print(f"=" * 60)
+    print(f"  1. 把持力リクエスト受理条件の大幅拡張")
+    print(f"  2. Collector→DDPG状態橋渡し機能追加")
+    print(f"  3. 健全性チェック機能実装")
+    print(f"  4. エラーハンドリング・ログ機能強化")
+    print(f"  5. Unity互換性向上（target_force + targetForce）")
+    print(f"=" * 70)
     
     base_output_dir = "DDPG_Python/logs"
     
@@ -991,7 +1255,8 @@ def main():
                     while system.is_running and system.episode_count < system.target_episodes:
                         time.sleep(10)
                         if system.episode_count % 100 == 0 and system.episode_count > 0:
-                            print(f"   Seed {seed}: {system.episode_count}/{system.target_episodes}ep")
+                            health = system.health_checker.get_status_summary()
+                            print(f"   Seed {seed}: {system.episode_count}/{system.target_episodes}ep - {health}")
                     
                     if system.episode_count >= system.target_episodes:
                         print(f"✅ Seed {seed} 完了!")
@@ -1013,10 +1278,13 @@ def main():
         
         if system.run_learning():
             try:
-                print(f"\n💡 TypeA学習実行中:")
+                print(f"\n💡 TypeA学習実行中（包括的修正版）:")
                 print(f"   実験タイプ: {args.type}")
                 print(f"   シード: {args.seed}")
                 print(f"   目標エピソード数: {system.target_episodes}")
+                print(f"   把持力リクエスト受理: 拡張対応")
+                print(f"   状態橋渡し: Collector→DDPG自動")
+                print(f"   健全性チェック: 30秒間隔")
                 print(f"   Ctrl+C で終了")
                 
                 # 進捗モニタリング
@@ -1027,7 +1295,8 @@ def main():
                     # 30秒ごとに進捗表示
                     current_time = time.time()
                     if current_time - last_progress_time >= 30:
-                        print(f"🔄 進捗: {system.episode_count}/{system.target_episodes}エピソード")
+                        health = system.health_checker.get_status_summary()
+                        print(f"🔄 進捗: {system.episode_count}/{system.target_episodes}ep - {health}")
                         last_progress_time = current_time
                 
                 if system.episode_count >= system.target_episodes:
