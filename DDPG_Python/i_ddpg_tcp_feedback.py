@@ -1,13 +1,6 @@
 #!/usr/bin/env python3
 """
-TypeA DDPG学習システム（包括的修正版）
-
-修正点：
-1. 把持力リクエスト受理条件の大幅拡張
-2. Collector(12345)→DDPG(12346)の状態橋渡し機能追加
-3. 健全性チェック機能実装
-4. エラーハンドリング・ログ機能強化
-5. Unity互換性向上
+TypeA DDPG学習システム
 """
 
 import numpy as np
@@ -16,7 +9,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use("Agg")       
+from matplotlib import pyplot as plt
 import os
 import json
 import time
@@ -101,6 +96,7 @@ class OUNoise:
 class ReplayBuffer:
     """経験再生バッファ"""
     def __init__(self, capacity=100000):
+        self.capacity = capacity 
         self.buffer = deque(maxlen=capacity)
     
     def push(self, state, action, reward, next_state, done):
@@ -235,7 +231,8 @@ class TypeADDPGSystem:
         torch.manual_seed(seed)
         if torch.cuda.is_available():
             torch.cuda.manual_seed(seed)
-        
+        self._final_saved = False 
+
         self.experiment_type = experiment_type
         self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.output_dir = f"DDPG_Python/logs/typea_{experiment_type}_seed{seed}_{self.session_id}"
@@ -243,11 +240,11 @@ class TypeADDPGSystem:
         
         # エピソード数設定
         if experiment_type == "A_400":
-            self.target_episodes = 400
+            self.target_episodes = 10000
         elif experiment_type == "A_long":
-            self.target_episodes = 5000
+            self.target_episodes = 10000
         else:
-            self.target_episodes = 400
+            self.target_episodes = 10000
         
         # 対称正規化パラメータ（F中心11.5N、半幅3.5N）
         self.force_center = 11.5  # N
@@ -331,6 +328,23 @@ class TypeADDPGSystem:
             'state_context_missing': 0,
             'collector_fallbacks': 0
         }
+
+        # === Exploration & Warmup schedule ===
+        self.warmup_episodes = 100
+        self.warmup_force_min = 2.0
+        self.warmup_force_max = 30.0
+        self.safe_force_min = 5.0
+        self.safe_force_max = 25.0
+
+        # ε-greedy と OU ノイズのスケジュール
+        self.eps_start = 1.0
+        self.eps_end = 0.05
+        self.eps_decay_ep = 300  # ここまでに ε を落とす
+
+        self.initial_ou_sigma = 0.6
+        self.min_ou_sigma = 0.05
+        self.noise.sigma = self.initial_ou_sigma
+
         
         print(f"🤖 TypeA DDPG学習システム初期化完了（包括的修正版）")
         print(f"   実験タイプ: {experiment_type}")
@@ -340,6 +354,70 @@ class TypeADDPGSystem:
         print(f"   出力ディレクトリ: {self.output_dir}")
         print(f"   健全性チェック: 有効")
         print(f"   状態橋渡し機能: 有効")
+
+    def force_to_action(self, force):
+        """[N]→[-1,1]"""
+        return float(np.clip((force - self.force_center) / self.force_halfwidth, -1.0, 1.0))
+
+    def current_epsilon(self):
+        ep = max(self.episode_count, 0)
+        frac = min(ep / max(self.eps_decay_ep, 1), 1.0)
+        return self.eps_start + (self.eps_end - self.eps_start) * frac
+
+    def scheduled_force_bounds(self):
+        """ウォームアップ中は 2–30N から 5–25N へ線形に絞る"""
+        if self.episode_count < self.warmup_episodes:
+            t = self.episode_count / max(self.warmup_episodes - 1, 1)
+            lo = self.warmup_force_min * (1 - t) + self.safe_force_min * t
+            hi = self.warmup_force_max * (1 - t) + self.safe_force_max * t
+        else:
+            lo, hi = self.safe_force_min, self.safe_force_max
+        return lo, hi
+
+    def update_exploration_schedules(self):
+        """OU σのアニーリング"""
+        frac = min(self.episode_count / max(self.eps_decay_ep, 1), 1.0)
+        self.noise.sigma = max(self.min_ou_sigma,
+                               self.initial_ou_sigma * (1 - frac) + self.min_ou_sigma * frac)
+
+
+
+    def _bridge_grip_request_from_collector(self, message_data):
+        """
+        Collector(12345) で受けたメッセージのうち把持力リクエストだけを
+        DDPGの handle_grip_force_request にそのまま渡す。
+        """
+        try:
+            # できるだけ寛容に判定（type, content, command など全部見る）
+            def _is_grip_req(d):
+                if isinstance(d, str):
+                    s = d.lower()
+                    return "request_grip_force" in s or ("grip" in s and "force" in s and "request" in s)
+                if isinstance(d, dict):
+                    fields = []
+                    for k in ("type","message_type","content","command","event","name"):
+                        v = d.get(k)
+                        if isinstance(v, str):
+                            fields.append(v.lower())
+                    blob = " ".join(fields)
+                    return ("request_grip_force" in blob) or \
+                        ("grip_force_request" in blob) or \
+                        (("grip" in blob) and ("force" in blob) and ("request" in blob))
+                return False
+
+            if _is_grip_req(message_data):
+                # 元がCollector由来だと分かるようにメタを付ける（ログ確認用）
+                if isinstance(message_data, dict):
+                    message_data = {**message_data, "_source": "collector_bridge"}
+                else:
+                    message_data = {"type": "text_message", "content": str(message_data), "_source": "collector_bridge"}
+
+                # DDPG標準のハンドラを呼ぶ（これが action を決めて send_message する）
+                self.handle_grip_force_request(message_data)
+        except Exception as e:
+            print(f"⚠️ 橋渡しハンドラエラー: {e}")
+
+
     
     def _setup_health_checks(self):
         """健全性チェック項目の設定"""
@@ -555,9 +633,9 @@ class TypeADDPGSystem:
             target_param.data.copy_(target_param.data * (1.0 - tau) + param.data * tau)
     
     def handle_grip_force_request(self, message_data):
+        
         """Unityからの把持力リクエスト処理（包括的修正版）"""
         try:
-            self.request_stats['total_requests'] += 1
             
             # ★ 修正1: 受理条件の大幅拡張（複数パターン対応）
             message_type = message_data.get('type', '').lower() if isinstance(message_data, dict) else ''
@@ -587,6 +665,7 @@ class TypeADDPGSystem:
             
             if not (is_json_request or is_text_request or is_direct_text):
                 return  # 把持力リクエストではない
+            self.request_stats['total_requests'] += 1
             
             # リクエストタイプ統計
             if is_json_request:
@@ -620,38 +699,63 @@ class TypeADDPGSystem:
             
             # 状態作成
             state = self.create_state(tcp_data, prev_action)
-            
-            # アクション選択
-            action = self.select_action(state, add_noise=True)
-            
-            # Pending状態を保存（K=1設計）
+
+
+                        # ここから置換開始
+            self.update_exploration_schedules()
+            eps = self.current_epsilon()
+            lo, hi = self.scheduled_force_bounds()
+
+            use_random = (self.episode_count < self.warmup_episodes) or (np.random.rand() < eps)
+            if use_random:
+                grip_force = float(np.random.uniform(lo, hi))
+                action = np.array([self.force_to_action(grip_force)], dtype=np.float32)
+            else:
+                action = self.select_action(state, add_noise=True)
+                grip_force = float(np.clip(self.denormalize_action(action[0]), lo, hi))
+
             self.pending_state = state
             self.pending_action = action
-            
-            # アクションを把持力に変換
-            grip_force = self.denormalize_action(action[0])
-            grip_force = np.clip(grip_force, 5.0, 25.0)  # 安全クランプ
-            
-            print(f"🤖 TypeA把持力決定: {grip_force:.2f}N (action: {action[0]:.3f}, noise_σ: {self.noise.sigma:.3f})")
-            print(f"   状態ソース: {source}, エピソード: {tcp_data.get('episode')}")
-            
-            # ★ 修正3: Unity互換性を考慮したTCP応答送信
+
             response = self._create_grip_force_response(grip_force, tcp_data, source)
-            
-            success = self.tcp_interface.send_message(response)
-            
-            if success:
+
+
+
+            sent = False
+            try:
+                # 1) 原則：学習側(12346)へ送る
+                sent = bool(self.tcp_interface.send_message(response))
+                # 2) 失敗時のみ Collector(12345) へフォールバック
+                if (not sent) and getattr(self, 'episode_collector', None) and getattr(self.episode_collector, 'tcp_interface', None):
+                    sent = bool(self.episode_collector.tcp_interface.send_message(response))
+            except Exception:
+                sent = False
+
+            # 3) 統計は一度だけ更新
+            if sent:
                 self.request_stats['successful_responses'] += 1
-                print(f"✅ 把持力コマンド送信成功")
+                print("✅ 把持力コマンド送信成功")
             else:
                 self.request_stats['failed_responses'] += 1
-                print(f"❌ 把持力コマンド送信失敗")
+                print("❌ 把持力コマンド送信失敗（接続先なし）")
+
             
         except Exception as e:
             self.request_stats['failed_responses'] += 1
             print(f"❌ 把持力リクエスト処理エラー: {e}")
             import traceback
             traceback.print_exc()
+
+    def _send_with_fallback(self, payload):
+        try:
+            if self.tcp_interface.send_message(payload):
+                return True
+            if getattr(self, 'episode_collector', None) and getattr(self.episode_collector, 'tcp_interface', None):
+                return self.episode_collector.tcp_interface.send_message(payload)
+        except Exception:
+            pass
+        return False
+
     
     def _create_grip_force_response(self, grip_force, tcp_data, source):
         """把持力応答メッセージ作成（Unity互換性考慮）"""
@@ -699,9 +803,17 @@ class TypeADDPGSystem:
         # DDPG側（12346）のコールバック
         self.tcp_interface.add_message_callback(self._handle_tcp_state)  # ロボット状態保持用
         self.tcp_interface.add_message_callback(self.handle_grip_force_request)  # 把持力リクエスト処理用
-        
-        # ★ 新機能: Collector側（12345）からDDPG側への状態橋渡し
+
+        self.episode_collector.tcp_interface.add_message_callback(
+            self._bridge_grip_request_from_collector
+        )
+
+        # ★ Collector側（12345）→ DDPG 側へ「状態のみ」橋渡し
         self.episode_collector.tcp_interface.add_state_update_callback(self._handle_collector_state_update)
+        # ※ メッセージの二重橋渡しを避けるため _bridge_collector_messages は登録しない
+
+
+
         print("   🌉 Collector→DDPG状態橋渡し設定完了")
         
         print("✅ TCPコールバック設定完了")
@@ -817,18 +929,21 @@ class TypeADDPGSystem:
     def _print_request_statistics(self):
         """リクエスト処理統計表示"""
         stats = self.request_stats
-        total = stats['total_requests']
-        
-        if total > 0:
-            success_rate = stats['successful_responses'] / total * 100
-            context_rate = stats['state_context_available'] / total * 100
+        total = stats['json_requests'] + stats['text_requests']
+        actual = max(1, stats['json_requests'] + stats['text_requests'])  # 実際の把持力リクエスト数
+        if total == 0:
+            print("\n📊 リクエスト処理統計: データなし")
+            return
+        success_rate = stats['successful_responses'] / actual * 100
+        context_rate = stats['state_context_available'] / actual * 100
+
             
-            print(f"\n📊 リクエスト処理統計:")
-            print(f"   総リクエスト数: {total}")
-            print(f"   JSON/テキスト: {stats['json_requests']}/{stats['text_requests']}")
-            print(f"   成功率: {success_rate:.1f}%")
-            print(f"   状態コンテキスト取得率: {context_rate:.1f}%")
-            print(f"   Collectorフォールバック: {stats['collector_fallbacks']}")
+        print(f"\n📊 リクエスト処理統計:")
+        print(f"   総リクエスト数: {total}")
+        print(f"   JSON/テキスト: {stats['json_requests']}/{stats['text_requests']}")
+        print(f"   成功率: {success_rate:.1f}%")
+        print(f"   状態コンテキスト取得率: {context_rate:.1f}%")
+        print(f"   Collectorフォールバック: {stats['collector_fallbacks']}")
     
     def _record_episode_data(self, episode, reward, actor_loss, critic_loss, avg_q):
         """エピソードデータの記録"""
@@ -841,9 +956,10 @@ class TypeADDPGSystem:
         
         # 把持力誤差
         force_error = abs(grip_force - self.force_center)
-        
+        phase = 'warmup' if (len(self.episode_data) + 1) <= self.warmup_episodes else 'train'
         episode_info = {
-            'episode': len(self.episode_data) + 1,  # 学習エピソード番号
+            'episode': len(self.episode_data) + 1,
+            'phase': phase, 
             'reward': reward,
             'grip_force': grip_force,
             'success': success,
@@ -900,34 +1016,31 @@ class TypeADDPGSystem:
             }, model_path)
         except Exception as e:
             print(f"⚠️ モデル保存エラー: {e}")
-    
+
     def _calculate_advanced_metrics(self):
-        """高度な指標計算"""
         if len(self.episode_data) == 0:
             return {}
-        
-        # DataFrameに変換
+
         df = pd.DataFrame(self.episode_data)
-        
-        # 移動平均計算（成功率）
-        success_ma = AnalysisUtils.moving_average(df['success'].values, window=100)
-        
-        # AUC計算
+
+        # ★ ウォームアップを除外して評価（train のみ）
+        df_train = df[df.get('phase', 'train') == 'train']
+        if len(df_train) == 0:
+            df_train = df  # 保険：全てウォームアップしか無い場合
+
+        success_ma = AnalysisUtils.moving_average(df_train['success'].values, window=100)
+
         auc_all = AnalysisUtils.calculate_auc(success_ma)
         auc_0_400 = AnalysisUtils.calculate_auc(success_ma[:400]) if len(success_ma) >= 400 else auc_all
-        
-        # plateau検出
+
         plateau_value, plateau_episode = AnalysisUtils.detect_plateau(success_ma, window=200, eps=1e-3)
-        
-        # time-to-70%
         time_to_70 = AnalysisUtils.find_time_to_threshold(success_ma, threshold=0.70)
-        
-        # 最終性能（最新100エピソード平均）
-        final_success_rate = np.mean(df['success'].iloc[-100:]) if len(df) >= 100 else np.mean(df['success'])
-        final_reward = np.mean(df['reward'].iloc[-100:]) if len(df) >= 100 else np.mean(df['reward'])
-        final_force_error = np.mean(df['force_error'].iloc[-100:]) if len(df) >= 100 else np.mean(df['force_error'])
-        final_damage_rate = np.mean(df['broken'].iloc[-100:]) if len(df) >= 100 else np.mean(df['broken'])
-        
+
+        final_success_rate = np.mean(df_train['success'].iloc[-100:]) if len(df_train) >= 100 else np.mean(df_train['success'])
+        final_reward = np.mean(df_train['reward'].iloc[-100:]) if len(df_train) >= 100 else np.mean(df_train['reward'])
+        final_force_error = np.mean(df_train['force_error'].iloc[-100:]) if len(df_train) >= 100 else np.mean(df_train['force_error'])
+        final_damage_rate = np.mean(df_train['broken'].iloc[-100:]) if len(df_train) >= 100 else np.mean(df_train['broken'])
+
         return {
             'auc_all': auc_all,
             'auc_0_400': auc_0_400,
@@ -940,6 +1053,7 @@ class TypeADDPGSystem:
             'final_damage_rate': final_damage_rate,
             'success_moving_average': success_ma.tolist()
         }
+
     
     def _save_final_results(self):
         """最終結果保存（包括的修正版）"""
@@ -1016,8 +1130,9 @@ class TypeADDPGSystem:
             'plateau_at_episode': advanced_metrics['plateau_episode'],
             'final_success_rate_at_400': advanced_metrics['success_moving_average'][399] if len(advanced_metrics['success_moving_average']) > 399 else None,
             'final_success_rate': advanced_metrics['final_success_rate'],
-            'request_success_rate': self.request_stats['successful_responses'] / max(self.request_stats['total_requests'], 1),
-            'state_context_rate': self.request_stats['state_context_available'] / max(self.request_stats['total_requests'], 1)
+            'request_success_rate': self.request_stats['successful_responses'] / max(self.request_stats['json_requests'] + self.request_stats['text_requests'], 1),
+            'state_context_rate': self.request_stats['state_context_available'] / max(self.request_stats['json_requests'] + self.request_stats['text_requests'], 1)
+
         }
         
         master_auc_path = os.path.join(self.output_dir, 'master_auc.json')
@@ -1041,6 +1156,7 @@ class TypeADDPGSystem:
             print(f"   Time-to-70%: Episode {advanced_metrics['time_to_70']}")
         if advanced_metrics['plateau_value'] is not None:
             print(f"   Plateau: {advanced_metrics['plateau_value']:.3f} (Episode {advanced_metrics['plateau_episode']})")
+        self._final_saved = True
     
     def _plot_learning_curves(self, df):
         """学習曲線のプロット"""
@@ -1127,7 +1243,7 @@ class TypeADDPGSystem:
         print(f"🏥 最終健全性: {self.health_checker.get_status_summary()}")
         
         # データがある場合のみ結果保存
-        if len(self.episode_data) > 0:
+        if (len(self.episode_data) > 0) and (not self._final_saved):
             self._save_final_results()
         
         # 学習スレッドの終了を待つ

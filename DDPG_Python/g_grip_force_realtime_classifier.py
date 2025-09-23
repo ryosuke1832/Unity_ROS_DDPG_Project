@@ -96,6 +96,59 @@ class RealtimeGripForceClassifier:
         print(f"🧠 リアルタイム把持力分類システム初期化")
         print(f"   セッションID: {self.session_id}")
         print(f"   出力ディレクトリ: {self.output_dir}")
+
+    def classify_features(self, features: np.ndarray):
+        """
+        特徴量から分類確率を取得（ドキュメント5で要求されたメソッド）
+        
+        Args:
+            features: 抽出された特徴量
+            
+        Returns:
+            dict: 分類結果（probabilities含む）
+        """
+        if self.model is None or self.scaler is None or self.class_names is None:
+            print("⚠️ 分類器が初期化されていません - フォールバック確率を返します")
+            return {
+                'probabilities': {
+                    'UnderGrip': 1/3, 
+                    'Success': 1/3, 
+                    'OverGrip': 1/3
+                }
+            }
+        
+        try:
+            # 入力次元合わせ
+            if features.shape[0] != self.input_size:
+                if features.shape[0] < self.input_size:
+                    features = np.pad(features, (0, self.input_size - features.shape[0]), 'constant')
+                else:
+                    features = features[:self.input_size]
+            
+            # 正規化
+            X = self.scaler.transform(features.reshape(1, -1))
+            
+            # 推論実行
+            with torch.no_grad():
+                logits = self.model(torch.FloatTensor(X).to(device))
+                probs = torch.softmax(logits, dim=1)[0].cpu().numpy()
+            
+            # 結果整形
+            probabilities = dict(zip(self.class_names, probs))
+            
+            return {
+                'probabilities': probabilities
+            }
+            
+        except Exception as e:
+            print(f"⚠️ 分類実行エラー: {e}")
+            return {
+                'probabilities': {
+                    'UnderGrip': 1/3, 
+                    'Success': 1/3, 
+                    'OverGrip': 1/3
+                }
+            }
     
     def load_model(self, model_path=None):
         """学習済みモデルの読み込み"""

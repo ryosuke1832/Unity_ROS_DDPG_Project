@@ -6258,7 +6258,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: dffa243396da20e4a8636701ed00878a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  baseGripForce: 12
+  baseGripForce: 18
   forceVariability: 0
   forceChangeRate: 1
   showDebugInfo: 0
@@ -8438,6 +8438,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1493371640}
   - component: {fileID: 1493371639}
+  - component: {fileID: 1493371641}
   m_Layer: 0
   m_Name: AluminumCanA2CClient
   m_TagString: Untagged
@@ -8465,8 +8466,8 @@ MonoBehaviour:
   sendInterval: 0.5
   enableCompression: 0
   maxRetries: 3
-  enableGripForceReceiving: 1
-  enableGripForceForwarding: 1
+  enableGripForceReceiving: 0
+  enableGripForceForwarding: 0
   maxGripForceValue: 30
   minGripForceValue: 0.1
   episodeManager: {fileID: 829712812}
@@ -8479,6 +8480,7 @@ MonoBehaviour:
   aluminumCan: {fileID: 622264442}
   gripForceController: {fileID: 1124406058}
   gripperInterface: {fileID: 1279036587}
+  sendOnlyOnFirstContact: 1
 --- !u!4 &1493371640
 Transform:
   m_ObjectHideFlags: 0
@@ -8493,6 +8495,41 @@ Transform:
   m_Father: {fileID: 0}
   m_RootOrder: 13
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1493371641
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1493371638}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 526854a067d67854789269e3566a0d0c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  serverHost: 127.0.0.1
+  serverPort: 12346
+  autoConnect: 1
+  autoReconnect: 1
+  reconnectInterval: 3
+  sendInterval: 1
+  enableCompression: 0
+  maxRetries: 3
+  enableGripForceReceiving: 1
+  enableGripForceForwarding: 1
+  maxGripForceValue: 30
+  minGripForceValue: 0.1
+  episodeManager: {fileID: 0}
+  autoFindEpisodeManager: 1
+  enableDebugLogs: 1
+  enableVerboseReceiveLog: 0
+  showGripForceGUI: 1
+  guiPosition: {x: 10, y: 300}
+  guiSize: {x: 300, y: 200}
+  aluminumCan: {fileID: 622264442}
+  gripForceController: {fileID: 1124406058}
+  gripperInterface: {fileID: 1279036587}
+  sendOnlyOnFirstContact: 1
 --- !u!4 &1553394582 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 8214453809557477258, guid: 5eecd5da92eb64eb6876d43ca0009083, type: 3}
